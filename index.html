@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V24 - Fixed Transaction)</title>
+    <title>Sistem Kasir Rafa Medica (V24 Fixed)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -66,14 +66,15 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+        // Konfigurasi Baru: Rafa Medica (stok-barang-49c8e)
         const userConfig = {
-            apiKey: "AIzaSyDezssTqCnCsmoaBC4CUA_ea9GMcxJcLtM",
-            authDomain: "rafamedica-73ff9.firebaseapp.com",
-            projectId: "rafamedica-73ff9",
-            storageBucket: "rafamedica-73ff9.firebasestorage.app",
-            messagingSenderId: "236196201099",
-            appId: "1:236196201099:web:0c181e65867f7203cc4a8e",
-            measurementId: "G-JJ05T5BPE0"
+            apiKey: "AIzaSyC8jXOyogDu_HIXVfjaVX7RhIc6kXiHdLk",
+            authDomain: "stok-barang-49c8e.firebaseapp.com",
+            projectId: "stok-barang-49c8e",
+            storageBucket: "stok-barang-49c8e.firebasestorage.app",
+            messagingSenderId: "1029640155610",
+            appId: "1:1029640155610:web:d7db44abf2c3843cd110e3",
+            measurementId: "G-12KTXQNRPP"
         };
 
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userConfig;
@@ -651,22 +652,26 @@
             const filteredItems = useMemo(() => { if (!search) return []; return fuse.search(search).map(r => r.item).slice(0, 30); }, [items, search, fuse]);
 
             const addToCart = (item) => {
-                // MODIFIED: Dihapus pengecekan stok <= 0 agar bisa minus
+                const stock = safeNumber(item.qty);
+                if (stock <= 0) { showToast("Stok Habis di Toko Ini!", "error"); return; }
+                
                 setCart(prev => {
                     const existing = prev.find(c => c.id === item.id);
-                    if (existing) {
-                        // MODIFIED: Dihapus pengecekan batas stok saat menambah
+                    if (existing) { 
+                        if (existing.cartQty >= stock) { showToast("Stok tidak cukup!", "error"); return prev; } 
                         return prev.map(c => c.id === item.id ? { ...c, cartQty: c.cartQty + 1 } : c); 
                     }
                     return [...prev, { ...item, cartQty: 1 }];
                 });
             };
             const removeFromCart = (id) => setCart(prev => prev.filter(c => c.id !== id));
+            
             const updateQty = (id, delta) => {
                 setCart(prev => prev.map(c => {
                     if (c.id === id) { 
                         const newQty = c.cartQty + delta; 
-                        // MODIFIED: Dihapus pengecekan newQty > c.qty
+                        const maxStock = safeNumber(c.qty);
+                        if (newQty > maxStock) { showToast("Stok mentok!", "error"); return c; } 
                         if (newQty < 1) return c; 
                         return { ...c, cartQty: newQty }; 
                     }
@@ -722,64 +727,44 @@
             const handleCheckout = async () => {
                 if (!user) return;
                 if (cart.length === 0) return;
-                if (safeNumber(paymentAmount) < grandTotal) { showToast("Uang kurang!", "error"); return; }
                 
+                // FINAL STOCK CHECK BEFORE CHECKOUT
+                const stockIssue = cart.find(c => c.cartQty > safeNumber(c.qty));
+                if (stockIssue) {
+                    showToast(`Stok ${stockIssue.name} tidak cukup!`, "error");
+                    return;
+                }
+
+                if (safeNumber(paymentAmount) < grandTotal) { showToast("Uang kurang!", "error"); return; }
                 setIsProcessing(true);
                 try {
                     const batch = window.writeBatch(window.db);
                     
-                    // 1. Sanitize Items (Bersihkan data agar tidak error saat disimpan ke Firestore)
-                    const cleanItems = cart.map(item => ({
-                        id: item.id,
-                        name: item.name,
-                        price: safeNumber(item.price),
-                        cartQty: safeNumber(item.cartQty),
-                        unit: item.unit || 'Pcs',
-                        rack: item.rack || '-'
-                    }));
-
-                    // 2. Update Stock
-                    cleanItems.forEach(item => {
-                        if(!item.id) return; // Skip invalid items
+                    // UPDATE STOCK SPECIFIC TO CURRENT STORE
+                    cart.forEach(item => { 
                         const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
                         const stockField = `stocks.${currentProfile.id}`;
-                        // INI AKAN MEMBUAT STOK JADI MINUS JIKA KURANG
-                        batch.update(docRef, { 
-                            [stockField]: window.increment(-item.cartQty), 
-                            updatedAt: window.serverTimestamp() 
-                        });
+                        batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() }); 
                     });
 
-                    // 3. Create Transaction with Robust ID Generation
-                    // Generate ID manual untuk memastikan path valid
-                    const txId = 'TX-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-                    const txRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions', txId);
-                    
-                    const newTransaction = {
-                        date: window.serverTimestamp(),
-                        items: cleanItems,
-                        total: grandTotal,
-                        pay: safeNumber(paymentAmount),
-                        change: change,
-                        status: 'success',
+                    const transactionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions');
+                    const newTransaction = { 
+                        date: window.serverTimestamp(), 
+                        items: cart, 
+                        total: grandTotal, 
+                        pay: safeNumber(paymentAmount), 
+                        change: change, 
+                        status: 'success', 
                         cashierName: user.email || 'Admin',
-                        storeId: currentProfile.id || 'default',
-                        storeName: currentProfile.name
+                        storeId: currentProfile.id || 'default', // Save Store ID
+                        storeName: currentProfile.name // Save Store Name
                     };
-
-                    batch.set(txRef, newTransaction);
+                    const docRef = window.doc(transactionRef);
+                    batch.set(docRef, newTransaction);
                     await batch.commit();
-
-                    // 4. Success State
-                    setReceiptData({ ...newTransaction, id: txId, date: new Date() });
-                    setPaymentSuccess(true);
-                    showToast("Transaksi Berhasil!");
-                } catch (error) {
-                    console.error("Checkout Error:", error);
-                    showToast(`Gagal: ${error.message || "Kesalahan database"}`, "error");
-                } finally {
-                    setIsProcessing(false);
-                }
+                    setReceiptData({ ...newTransaction, id: docRef.id, date: new Date() }); 
+                    setPaymentSuccess(true); showToast("Transaksi Berhasil!");
+                } catch (error) { console.error(error); showToast("Transaksi Gagal", "error"); } finally { setIsProcessing(false); }
             };
 
             const handleCloseSuccess = () => { setCheckoutModal(false); setPaymentSuccess(false); setReceiptData(null); setCart([]); setPaymentAmount(''); setIsSessionActive(false); };
@@ -820,7 +805,7 @@
                     <div className="flex-1 flex flex-col h-full min-h-0">
                         <div className="flex items-center gap-3 mb-4"><button onClick={handleBack} className="w-10 h-10 rounded-xl bg-white text-slate-400 hover:text-sky-600 hover:border-sky-300 border border-slate-200 flex items-center justify-center shadow-sm transition-colors" title="Kembali & Simpan Sementara"><Icon name="arrow-left" /></button><div className="relative group flex-1"><input autoFocus type="text" placeholder="Ketik nama barang disini..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-200 shadow-soft focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all font-bold text-lg text-slate-700 placeholder:font-normal placeholder:text-slate-400" value={search} onChange={e => setSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-sky-500" /></div></div>
                         <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 pb-2">
-                            {search === '' ? (<div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60"><Icon name="magnifying-glass" className="text-6xl mb-4 text-slate-300" /><p className="font-semibold text-lg">Mulai ketik untuk mencari barang...</p><p className="text-xs mt-1">Stok diambil dari: <b>{currentProfile.name}</b></p></div>) : (<div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{filteredItems.map(item => { const inCart = cart.find(c => c.id === item.id); const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty : 0); const isOOS = currentStock <= 0; return (<button key={item.id} onClick={() => addToCart(item)} className={`text-left p-3 rounded-xl border transition-all relative overflow-hidden group ${isOOS ? 'bg-red-50 border-red-200 hover:bg-red-100 hover:shadow-md' : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md'}`}>{isNewItem(item.createdAt) && !isOOS && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[8px] font-bold px-1.5 rounded-bl-lg">NEW</span>}<h4 className="font-bold text-slate-800 text-xs line-clamp-2 h-8 leading-snug">{item.name}</h4><div className="mt-2 flex justify-between items-end"><div><p className="text-[10px] text-slate-500 font-medium">{item.unit}</p><p className="text-xs font-bold text-sky-600">{formatRupiah(item.price)}</p></div><div className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isOOS ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>Stok: {currentStock}</div></div><div className="absolute inset-0 bg-sky-500/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Icon name="plus" className="text-sky-600 text-xl" /></div></button>)})}{filteredItems.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 text-sm">Barang tidak ditemukan</div>}</div>)}
+                            {search === '' ? (<div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60"><Icon name="magnifying-glass" className="text-6xl mb-4 text-slate-300" /><p className="font-semibold text-lg">Mulai ketik untuk mencari barang...</p><p className="text-xs mt-1">Stok diambil dari: <b>{currentProfile.name}</b></p></div>) : (<div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{filteredItems.map(item => { const inCart = cart.find(c => c.id === item.id); const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty : 0); const isOOS = currentStock <= 0; return (<button key={item.id} onClick={() => addToCart(item)} disabled={isOOS} className={`text-left p-3 rounded-xl border transition-all relative overflow-hidden group ${isOOS ? 'bg-slate-100 border-slate-200 opacity-70 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md'}`}>{isNewItem(item.createdAt) && !isOOS && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[8px] font-bold px-1.5 rounded-bl-lg">NEW</span>}<h4 className="font-bold text-slate-800 text-xs line-clamp-2 h-8 leading-snug">{item.name}</h4><div className="mt-2 flex justify-between items-end"><div><p className="text-[10px] text-slate-500 font-medium">{item.unit}</p><p className="text-xs font-bold text-sky-600">{formatRupiah(item.price)}</p></div><div className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isOOS ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>Stok: {currentStock}</div></div>{!isOOS && <div className="absolute inset-0 bg-sky-500/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Icon name="plus" className="text-sky-600 text-xl" /></div>}</button>)})}{filteredItems.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 text-sm">Barang tidak ditemukan</div>}</div>)}
                         </div>
                     </div>
                     <div className="w-full md:w-80 lg:w-96 flex flex-col bg-white rounded-3xl shadow-soft border border-slate-100 h-fit md:h-full max-h-[calc(100vh-100px)]">
@@ -1021,13 +1006,16 @@
                         const batch = window.writeBatch(window.db);
                         chunks[i].forEach(item => {
                             const docRef = window.doc(collectionRef);
+                            // --- FIX: STRUCTURE DATA CORRECTLY ---
                             batch.set(docRef, {
                                 name: item.name,
                                 unit: item.unit,
                                 rack: item.rack,
                                 exp: item.exp,
                                 price: item.price,
-                                [`stocks.${currentProfile.id}`]: item.qty,
+                                // Key Fix: Store stocks as a map, NOT a string key
+                                stocks: { [currentProfile.id]: item.qty }, 
+                                qty: item.qty, // Legacy fallback
                                 createdAt: window.serverTimestamp(),
                                 updatedAt: window.serverTimestamp()
                             });
@@ -1554,7 +1542,7 @@
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 24.0 • Rafa Medica Update</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 24.1 (Fix) • Rafa Medica Update</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
