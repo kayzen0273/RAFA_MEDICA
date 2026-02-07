@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (Stok Minus)</title>
+    <title>Sistem Kasir Rafa Medica (V24 - New Config)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -66,15 +66,15 @@
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Konfigurasi Baru: Rafa Medica (stok-barang-49c8e)
+        // Konfigurasi Baru: rafamedica-73ff9
         const userConfig = {
-            apiKey: "AIzaSyC8jXOyogDu_HIXVfjaVX7RhIc6kXiHdLk",
-            authDomain: "stok-barang-49c8e.firebaseapp.com",
-            projectId: "stok-barang-49c8e",
-            storageBucket: "stok-barang-49c8e.firebasestorage.app",
-            messagingSenderId: "1029640155610",
-            appId: "1:1029640155610:web:d7db44abf2c3843cd110e3",
-            measurementId: "G-12KTXQNRPP"
+            apiKey: "AIzaSyDezssTqCnCsmoaBC4CUA_ea9GMcxJcLtM",
+            authDomain: "rafamedica-73ff9.firebaseapp.com",
+            projectId: "rafamedica-73ff9",
+            storageBucket: "rafamedica-73ff9.firebasestorage.app",
+            messagingSenderId: "236196201099",
+            appId: "1:236196201099:web:0c181e65867f7203cc4a8e",
+            measurementId: "G-JJ05T5BPE0"
         };
 
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : userConfig;
