@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V25 - Reset DB)</title>
+    <title>Sistem Kasir Rafa Medica (V25 - Multi Struk)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -64,7 +64,6 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // ADDED getDocs here
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi Baru: Rafa Medica (stok-barang-49c8e)
@@ -97,7 +96,7 @@
         window.deleteDoc = deleteDoc;
         window.setDoc = setDoc;
         window.getDoc = getDoc;
-        window.getDocs = getDocs; // ADDED EXPOSE
+        window.getDocs = getDocs;
         window.doc = doc;
         window.onSnapshot = onSnapshot;
         window.serverTimestamp = serverTimestamp;
@@ -170,12 +169,17 @@
         // --- DEFAULT SETTINGS ---
         const DEFAULT_SETTINGS = {
             lowStockThreshold: 5,
-            storeName: APP_NAME,
-            storeAddress: "Indonesia",
-            additionalHeaders: [], 
-            receiptFooter: "Terima Kasih\nBarang tidak dapat ditukar",
+            storeName: APP_NAME, // Fallback Global
+            storeAddress: "Indonesia", // Fallback Global
+            receiptFooter: "Terima Kasih\nBarang tidak dapat ditukar", // Fallback Global
             storeProfiles: [
-                { id: 'default', name: APP_NAME, address: "Indonesia" }
+                { 
+                    id: 'default', 
+                    name: APP_NAME, 
+                    address: "Indonesia",
+                    footer: "Terima Kasih\nBarang tidak dapat ditukar",
+                    additionalHeaders: []
+                }
             ]
         };
 
@@ -352,10 +356,18 @@
                 const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
                 const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
                 const encoder = new ThermalPrinterEncoder();
-                encoder.init().alignCenter().bold(true).text(settings.storeName || APP_NAME).newline().bold(false).text(settings.storeAddress || "Indonesia").newline();
+                
+                // --- GUNAKAN DATA DARI PROFILE SPESIFIK JIKA ADA ---
+                const storeName = settings.storeName || APP_NAME;
+                const storeAddr = settings.storeAddress || "Indonesia";
+                const footerText = settings.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar";
                 const headers = settings.additionalHeaders || [];
+
+                encoder.init().alignCenter().bold(true).text(storeName).newline().bold(false).text(storeAddr).newline();
+                
                 if (settings.storeHeader3 && (!headers.length)) { encoder.text(settings.storeHeader3).newline(); }
                 headers.forEach(h => { if(h && h.trim()) encoder.text(h).newline(); });
+                
                 encoder.line().alignLeft().text(`Tgl: ${new Date(receipt.date.seconds ? receipt.date.toDate() : receipt.date).toLocaleString('id-ID')}`).newline().line();
                 receipt.items.forEach(item => {
                     const validQty = item.cartQty - (item.returnedQty || 0);
@@ -373,9 +385,10 @@
                 encoder.bold(true); printRow("TOTAL", validTotal); encoder.bold(false);
                 if (receipt.pay !== undefined && receipt.change !== undefined) { printRow("TUNAI", receipt.pay); printRow("KEMBALI", receipt.change); }
                 encoder.feed(2).alignCenter().bold(false);
-                const footerText = settings.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar";
+                
                 const footerLines = footerText.split('\n');
                 footerLines.forEach(line => { if(line && line.trim() !== "") { encoder.text(line.trim()).newline(); } });
+                
                 if (receipt.status === 'returned' || receipt.status === 'partial') { encoder.text(receipt.status === 'returned' ? "RETUR FULL" : "ADA RETUR SEBAGIAN").newline(); }
                 encoder.feed(3);
                 const encodedData = encoder.encode();
@@ -385,196 +398,232 @@
             } catch (error) { console.error("Print Error", error); return false; }
         };
 
-        // --- SETTINGS COMPONENT ---
+        // --- UPDATED SETTINGS COMPONENT (MULTI STORE RECEIPT) ---
         const SettingsView = ({ settings, onSave, loading }) => {
             const [localSettings, setLocalSettings] = useState(settings);
-            const [headers, setHeaders] = useState(() => settings.additionalHeaders && settings.additionalHeaders.length > 0 ? settings.additionalHeaders : (settings.storeHeader3 ? [settings.storeHeader3] : []));
-            const [profiles, setProfiles] = useState(() => settings.storeProfiles || [{ id: 'default', name: settings.storeName || APP_NAME, address: settings.storeAddress || '' }]);
+            const [profiles, setProfiles] = useState(() => settings.storeProfiles || [{ id: 'default', name: settings.storeName || APP_NAME, address: settings.storeAddress || '', footer: settings.receiptFooter, additionalHeaders: settings.additionalHeaders || [] }]);
             
-            const [newProfileName, setNewProfileName] = useState('');
-            const [newProfileAddress, setNewProfileAddress] = useState('');
+            // Edit Mode
+            const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id || 'default');
+            const activeProfile = profiles.find(p => p.id === selectedProfileId) || profiles[0];
 
-            // State for Reset Database
+            // State for Adding Store
+            const [isAddingStore, setIsAddingStore] = useState(false);
+            const [newStoreName, setNewStoreName] = useState("");
+
+            // Reset DB State
             const [showResetModal, setShowResetModal] = useState(false);
             const [resetInput, setResetInput] = useState("");
             const [isResetting, setIsResetting] = useState(false);
-            const [resetProgress, setResetProgress] = useState(0);
 
-            useEffect(() => { setLocalSettings(settings); if (settings.additionalHeaders && settings.additionalHeaders.length > 0) { setHeaders(settings.additionalHeaders); } if(settings.storeProfiles) setProfiles(settings.storeProfiles); }, [settings]);
+            useEffect(() => { 
+                setLocalSettings(settings); 
+                if(settings.storeProfiles) {
+                    // Ensure backward compatibility
+                    const enhancedProfiles = settings.storeProfiles.map(p => ({
+                        ...p,
+                        footer: p.footer || settings.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar",
+                        additionalHeaders: p.additionalHeaders || []
+                    }));
+                    setProfiles(enhancedProfiles);
+                }
+            }, [settings]);
             
-            const handleChange = (key, value) => { setLocalSettings(prev => ({ ...prev, [key]: value })); };
-            const handleHeaderChange = (idx, val) => { const newHeaders = [...headers]; newHeaders[idx] = val; setHeaders(newHeaders); handleChange('additionalHeaders', newHeaders); };
-            const addHeader = () => { const newHeaders = [...headers, ""]; setHeaders(newHeaders); handleChange('additionalHeaders', newHeaders); };
-            const removeHeader = (idx) => { const newHeaders = headers.filter((_, i) => i !== idx); setHeaders(newHeaders); handleChange('additionalHeaders', newHeaders); };
-            
-            // Profile Handlers
-            const addProfile = () => {
-                if(!newProfileName) return;
-                const newProfile = {
-                    id: 'store_' + Date.now(),
-                    name: newProfileName,
-                    address: newProfileAddress
-                };
-                const updatedProfiles = [...profiles, newProfile];
+            // Helper to update specific profile
+            const updateProfile = (id, field, value) => {
+                const updatedProfiles = profiles.map(p => {
+                    if (p.id === id) return { ...p, [field]: value };
+                    return p;
+                });
                 setProfiles(updatedProfiles);
-                handleChange('storeProfiles', updatedProfiles);
-                setNewProfileName('');
-                setNewProfileAddress('');
+            };
+
+            const handleHeaderChange = (profileId, idx, val) => {
+                const profile = profiles.find(p => p.id === profileId);
+                const newHeaders = [...(profile.additionalHeaders || [])];
+                newHeaders[idx] = val;
+                updateProfile(profileId, 'additionalHeaders', newHeaders);
+            };
+
+            const addHeader = (profileId) => {
+                const profile = profiles.find(p => p.id === profileId);
+                const newHeaders = [...(profile.additionalHeaders || []), ""];
+                updateProfile(profileId, 'additionalHeaders', newHeaders);
+            };
+
+            const removeHeader = (profileId, idx) => {
+                const profile = profiles.find(p => p.id === profileId);
+                const newHeaders = (profile.additionalHeaders || []).filter((_, i) => i !== idx);
+                updateProfile(profileId, 'additionalHeaders', newHeaders);
+            };
+
+            const handleAddNewStore = () => {
+                if (!newStoreName.trim()) return;
+                const newId = 'store_' + Date.now();
+                const newProfile = {
+                    id: newId,
+                    name: newStoreName,
+                    address: "Indonesia",
+                    footer: "Terima Kasih",
+                    additionalHeaders: []
+                };
+                setProfiles([...profiles, newProfile]);
+                setNewStoreName("");
+                setIsAddingStore(false);
+                setSelectedProfileId(newId);
             };
 
             const removeProfile = (id) => {
-                if(profiles.length <= 1) {
-                    alert("Minimal harus ada 1 profil toko.");
-                    return;
-                }
-                const updatedProfiles = profiles.filter(p => p.id !== id);
-                setProfiles(updatedProfiles);
-                handleChange('storeProfiles', updatedProfiles);
+                if (profiles.length <= 1) { alert("Minimal harus ada 1 profil toko."); return; }
+                if (!confirm("Hapus toko ini? Data stok mungkin masih tersimpan tapi tidak bisa diakses.")) return;
+                const newProfiles = profiles.filter(p => p.id !== id);
+                setProfiles(newProfiles);
+                if (selectedProfileId === id) setSelectedProfileId(newProfiles[0].id);
             };
 
+            const handleSave = () => {
+                // Simpan storeProfiles yang baru ke settings global
+                // Juga update fallback global values dengan profile pertama (untuk backward compatibility)
+                const mainProfile = profiles[0];
+                onSave({ 
+                    ...localSettings,
+                    storeName: mainProfile.name,
+                    storeAddress: mainProfile.address,
+                    receiptFooter: mainProfile.footer,
+                    additionalHeaders: mainProfile.additionalHeaders,
+                    storeProfiles: profiles 
+                }); 
+            };
+            
             // DANGER ZONE HANDLERS
             const handleResetDatabase = async () => {
-                if (resetInput !== 'RESET') {
-                    alert("Mohon ketik kata RESET dengan benar.");
-                    return;
-                }
-                
+                if (resetInput !== 'RESET') { alert("Mohon ketik kata RESET dengan benar."); return; }
                 if(!confirm("PERINGATAN TERAKHIR: Apakah Anda yakin? Semua data stok dan transaksi akan HILANG SELAMANYA.")) return;
 
                 setIsResetting(true);
-                setResetProgress(0);
-
-                const collectionsToClear = [
-                    'inventory', 
-                    'transactions', 
-                    'purchases', 
-                    'suppliers', 
-                    'pending_carts'
-                ];
-
+                const collectionsToClear = ['inventory', 'transactions', 'purchases', 'suppliers', 'pending_carts'];
                 try {
                     let totalDeleted = 0;
-                    
                     for (const colName of collectionsToClear) {
                         const colRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', colName);
                         const snapshot = await window.getDocs(colRef);
-                        const totalDocs = snapshot.docs.length;
-
-                        // Batch delete logic (Firestore limit 500 per batch)
-                        const chunkSize = 400;
-                        const chunks = [];
-                        let currentChunk = [];
-
-                        snapshot.docs.forEach(doc => {
-                            currentChunk.push(doc);
-                            if (currentChunk.length >= chunkSize) {
-                                chunks.push(currentChunk);
-                                currentChunk = [];
-                            }
-                        });
-                        if (currentChunk.length > 0) chunks.push(currentChunk);
-
-                        // Process chunks
-                        for (const chunk of chunks) {
-                            const batch = window.writeBatch(window.db);
-                            chunk.forEach(doc => batch.delete(doc.ref));
-                            await batch.commit();
-                            totalDeleted += chunk.length;
-                        }
+                        const batch = window.writeBatch(window.db);
+                        snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                        await batch.commit();
+                        totalDeleted += snapshot.docs.length;
                     }
-                    
                     alert(`Database Berhasil Direset! ${totalDeleted} dokumen dihapus.`);
-                    setShowResetModal(false);
-                    setResetInput("");
-                    window.location.reload(); // Reload to refresh data
-
-                } catch (error) {
-                    console.error("Reset Error:", error);
-                    alert("Gagal mereset database. Cek konsol browser.");
-                } finally {
-                    setIsResetting(false);
-                }
+                    setShowResetModal(false); setResetInput(""); window.location.reload();
+                } catch (error) { console.error("Reset Error:", error); alert("Gagal mereset database."); } finally { setIsResetting(false); }
             };
 
-            const handleSave = () => { onSave({ ...localSettings, additionalHeaders: headers, storeProfiles: profiles }); };
-
             return (
-                 <div className="fade-in max-w-2xl mx-auto w-full pt-4 md:pt-10 pb-20">
+                 <div className="fade-in max-w-4xl mx-auto w-full pt-4 md:pt-10 pb-20">
                     <div className="bg-white/90 backdrop-blur-sm p-6 rounded-[30px] shadow-soft border border-white">
-                        <header className="mb-6 flex items-center gap-4">
+                        <header className="mb-6 flex items-center gap-4 border-b border-slate-100 pb-4">
                             <div className="w-12 h-12 bg-slate-800 text-white rounded-2xl flex items-center justify-center text-xl shadow-sm"><Icon name="gears" /></div>
-                            <div><h2 className="text-xl font-bold text-slate-800">Pengaturan Aplikasi</h2><p className="text-xs text-slate-400">Atur preferensi sistem & printer</p></div>
+                            <div><h2 className="text-xl font-bold text-slate-800">Pengaturan Toko & Struk</h2><p className="text-xs text-slate-400">Atur profil cabang dan format cetak masing-masing</p></div>
                         </header>
-                        <div className="space-y-6">
-                            
-                            {/* MULTI STORE PROFILES */}
-                             <div className="p-4 rounded-2xl border border-sky-200 bg-sky-50">
-                                <h3 className="font-bold text-sky-800 mb-3 flex items-center gap-2"><Icon name="shop" /> Kelola Cabang / Profil Toko</h3>
-                                <div className="bg-sky-100 p-3 rounded-lg text-xs text-sky-800 mb-3 border border-sky-200">
-                                    <strong>Info Stok Multi-Toko:</strong><br/>
-                                    Menambahkan toko di sini akan membuat <b>Stok</b>, <b>Kasir</b>, dan <b>Riwayat</b> terpisah untuk setiap toko. Nama barang dan harga tetap sama (terpusat).
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            {/* Left Sidebar: Store List */}
+                            <div className="md:col-span-1 space-y-3">
+                                <div className="flex justify-between items-center mb-2">
+                                    <h3 className="font-bold text-slate-700 text-sm">Daftar Toko</h3>
+                                    <button onClick={() => setIsAddingStore(true)} className="text-[10px] bg-sky-50 text-sky-600 px-2 py-1 rounded-lg font-bold border border-sky-100 hover:bg-sky-100">+ Tambah</button>
                                 </div>
                                 
-                                <div className="space-y-2 mb-4">
-                                    {profiles.map((p, idx) => (
-                                        <div key={p.id} className="bg-white p-3 rounded-xl border border-sky-100 flex justify-between items-center shadow-sm">
-                                            <div>
-                                                <div className="font-bold text-slate-800 text-sm">{p.name}</div>
-                                                <div className="text-xs text-slate-500">{p.address}</div>
-                                                <div className="text-[9px] text-sky-600 bg-sky-50 inline-block px-1 rounded mt-1">ID: {p.id}</div>
-                                            </div>
-                                            {idx > 0 && (
-                                                <button onClick={() => removeProfile(p.id)} className="w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-100 flex items-center justify-center"><Icon name="trash" /></button>
-                                            )}
+                                {isAddingStore && (
+                                    <div className="p-3 bg-sky-50 rounded-xl border border-sky-200 mb-2 animate-slide-up">
+                                        <label className="text-[10px] font-bold text-sky-700 block mb-1">Nama Toko Baru</label>
+                                        <input autoFocus type="text" value={newStoreName} onChange={e => setNewStoreName(e.target.value)} className="w-full p-2 text-xs border border-sky-200 rounded-lg mb-2 focus:ring-2 focus:ring-sky-400 outline-none" placeholder="Cabang Baru..." />
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setIsAddingStore(false)} className="flex-1 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded-lg">Batal</button>
+                                            <button onClick={handleAddNewStore} disabled={!newStoreName} className="flex-1 py-1.5 bg-sky-600 text-white text-[10px] font-bold rounded-lg shadow-sm disabled:opacity-50">Simpan</button>
                                         </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
+                                    {profiles.map(p => (
+                                        <button 
+                                            key={p.id} 
+                                            onClick={() => setSelectedProfileId(p.id)}
+                                            className={`w-full text-left p-3 rounded-xl border transition-all relative group ${selectedProfileId === p.id ? 'bg-slate-800 text-white border-slate-800 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                                        >
+                                            <div className="font-bold text-sm truncate pr-6">{p.name}</div>
+                                            <div className={`text-[10px] truncate ${selectedProfileId === p.id ? 'text-slate-400' : 'text-slate-400'}`}>{p.address || 'Belum ada alamat'}</div>
+                                            {selectedProfileId === p.id && <div className="absolute top-1/2 -translate-y-1/2 right-3 w-2 h-2 rounded-full bg-brand-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]"></div>}
+                                        </button>
                                     ))}
                                 </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    <input type="text" value={newProfileName} onChange={e => setNewProfileName(e.target.value)} placeholder="Nama Toko Baru" className="p-2 rounded-lg border border-sky-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
-                                    <input type="text" value={newProfileAddress} onChange={e => setNewProfileAddress(e.target.value)} placeholder="Alamat Toko" className="p-2 rounded-lg border border-sky-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+                                
+                                <div className="pt-4 border-t border-slate-100 mt-4">
+                                     <h3 className="font-bold text-slate-700 text-xs mb-2">Global Settings</h3>
+                                     <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                        <span className="text-xs font-bold text-slate-500">Low Stock Limit</span>
+                                        <input type="number" value={localSettings.lowStockThreshold} onChange={(e) => setLocalSettings({ ...localSettings, lowStockThreshold: parseInt(e.target.value) || 0 })} className="w-16 p-1 text-center text-xs font-bold border border-slate-300 rounded focus:border-sky-500 outline-none" />
+                                     </div>
                                 </div>
-                                <button onClick={addProfile} className="mt-2 w-full py-2 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-700 transition-colors">+ Tambah Toko</button>
+
+                                <div className="pt-4 border-t border-slate-100">
+                                    <button onClick={() => setShowResetModal(true)} className="w-full py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-2"><Icon name="trash" /> Reset Database</button>
+                                </div>
                             </div>
 
-                            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
-                                <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Icon name="boxes-stacked" className="text-sky-600" /> Pengaturan Stok</h3>
-                                <div className="space-y-3">
-                                    <div>
-                                        <label className="text-xs font-bold text-slate-500 block mb-1">Batas Stok Menipis (Global)</label>
-                                        <div className="flex items-center gap-3">
-                                            <input type="number" value={localSettings.lowStockThreshold} onChange={(e) => handleChange('lowStockThreshold', parseInt(e.target.value) || 0)} className="w-24 p-2 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-center font-bold" />
-                                            <span className="text-xs text-slate-400">Unit (Default)</span>
+                            {/* Right Content: Edit Selected Profile */}
+                            <div className="md:col-span-2">
+                                {activeProfile ? (
+                                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 h-full relative">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="store" className="text-sky-600" /> Edit Profil: {activeProfile.name}</h3>
+                                            {profiles.length > 1 && (
+                                                <button onClick={() => removeProfile(activeProfile.id)} className="text-[10px] text-red-500 font-bold hover:underline flex items-center gap-1"><Icon name="trash" /> Hapus Toko Ini</button>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nama Toko (Judul Struk)</label>
+                                                    <input type="text" value={activeProfile.name} onChange={(e) => updateProfile(activeProfile.id, 'name', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm font-bold" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Alamat / Sub-judul</label>
+                                                    <input type="text" value={activeProfile.address} onChange={(e) => updateProfile(activeProfile.id, 'address', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" />
+                                                </div>
+                                            </div>
+
+                                            <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Header Tambahan (Opsional)</label>
+                                                    <button onClick={() => addHeader(activeProfile.id)} className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded border border-sky-100 hover:bg-sky-100">+ Baris</button>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {(!activeProfile.additionalHeaders || activeProfile.additionalHeaders.length === 0) && <p className="text-[10px] text-slate-400 italic">Tidak ada header tambahan (No. Telp, IG, dll).</p>}
+                                                    {(activeProfile.additionalHeaders || []).map((h, idx) => (
+                                                        <div key={idx} className="flex gap-2">
+                                                            <input type="text" value={h} onChange={(e) => handleHeaderChange(activeProfile.id, idx, e.target.value)} className="flex-1 p-2 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-xs" placeholder={`Info Tambahan ${idx + 1}`} />
+                                                            <button onClick={() => removeHeader(activeProfile.id, idx)} className="w-8 bg-red-50 text-red-500 rounded-lg border border-red-100 hover:bg-red-100 flex items-center justify-center"><Icon name="xmark" /></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Footer Struk (Pesan Bawah)</label>
+                                                <textarea value={activeProfile.footer || ''} onChange={(e) => updateProfile(activeProfile.id, 'footer', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm h-20 resize-none font-mono text-xs" placeholder="Terima Kasih..."></textarea>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
+                                ) : (
+                                    <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border border-dashed border-slate-300 rounded-2xl bg-slate-50">Pilih toko di sebelah kiri untuk mengedit.</div>
+                                )}
                             </div>
-                            <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50">
-                                <h3 className="font-bold text-slate-700 mb-3 flex items-center gap-2"><Icon name="print" className="text-sky-600" /> Format Cetak Struk (Default)</h3>
-                                <div className="space-y-3">
-                                    <div><label className="text-xs font-bold text-slate-500 block mb-1">Nama Toko Utama</label><input type="text" value={localSettings.storeName} onChange={(e) => handleChange('storeName', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" placeholder="Contoh: Toko Husna" /></div>
-                                    <div><label className="text-xs font-bold text-slate-500 block mb-1">Alamat/Info Utama</label><input type="text" value={localSettings.storeAddress} onChange={(e) => handleChange('storeAddress', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" placeholder="Contoh: Jl. Raya No. 1" /></div>
-                                    <div className="bg-slate-100 p-3 rounded-xl border border-slate-200">
-                                        <div className="flex justify-between items-center mb-2"><label className="text-xs font-bold text-slate-500">Baris Header Tambahan</label><button onClick={addHeader} className="text-[10px] font-bold text-sky-600 hover:text-sky-700 bg-sky-50 px-2 py-1 rounded border border-sky-100 flex items-center gap-1"><Icon name="plus" /> Tambah Baris</button></div>
-                                        <div className="space-y-2">{headers.length === 0 && <p className="text-[10px] text-slate-400 italic">Belum ada header tambahan.</p>}{headers.map((h, idx) => (<div key={idx} className="flex gap-2"><input type="text" value={h} onChange={(e) => handleHeaderChange(idx, e.target.value)} className="flex-1 p-2 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" placeholder={`Info Tambahan ${idx + 1}`} /><button onClick={() => removeHeader(idx)} className="w-9 bg-red-50 text-red-500 rounded-lg border border-red-100 hover:bg-red-100 flex items-center justify-center"><Icon name="trash" /></button></div>))}</div>
-                                    </div>
-                                    <div><label className="text-xs font-bold text-slate-500 block mb-1">Footer (Pesan Bawah)</label><textarea value={localSettings.receiptFooter} onChange={(e) => handleChange('receiptFooter', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm h-20" placeholder="Pesan di bagian bawah struk..."></textarea></div>
-                                </div>
-                            </div>
-                            
-                            <div className="p-4 rounded-2xl border border-green-200 bg-green-50">
-                                <h3 className="font-bold text-green-800 mb-2 flex items-center gap-2"><Icon name="image" /> Format WhatsApp JPG</h3>
-                                <p className="text-xs text-green-700">Aplikasi sekarang akan membuat <b>Gambar Struk (JPG)</b> secara otomatis saat tombol WA diklik. Di HP, gambar akan langsung masuk ke menu Share (pilih WA). Di Laptop, gambar akan terdownload.</p>
-                            </div>
-                            
-                            {/* DANGER ZONE */}
-                            <div className="p-4 rounded-2xl border border-red-200 bg-red-50 mt-4">
-                                <h3 className="font-bold text-red-800 mb-2 flex items-center gap-2"><Icon name="triangle-exclamation" /> Zona Bahaya</h3>
-                                <p className="text-xs text-red-700 mb-3">Tindakan di bawah ini tidak dapat dibatalkan. Menghapus database akan menghilangkan semua stok, riwayat penjualan, faktur, dan data supplier.</p>
-                                <button onClick={() => setShowResetModal(true)} className="w-full py-3 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 shadow-md transition-colors flex items-center justify-center gap-2"><Icon name="trash" /> Hapus Semua Database</button>
-                            </div>
+                        </div>
 
-                            <button onClick={handleSave} disabled={loading} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2">{loading ? <div className="typing-dot bg-white"></div> : <Icon name="floppy-disk" />} Simpan Pengaturan</button>
+                        <div className="mt-6 pt-6 border-t border-slate-100">
+                             <button onClick={handleSave} disabled={loading} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-slate-900">{loading ? <div className="typing-dot bg-white"></div> : <Icon name="floppy-disk" />} Simpan Semua Pengaturan</button>
                         </div>
                     </div>
 
@@ -584,34 +633,23 @@
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 transform transition-all scale-100 border-2 border-red-500">
                                 <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600 text-3xl"><Icon name="skull" /></div>
                                 <h3 className="text-xl font-black text-center text-red-700 mb-2 uppercase tracking-tight">Hapus Total Database?</h3>
-                                <p className="text-center text-sm text-slate-600 mb-4">
-                                    Ini akan menghapus: <br/>
-                                    <b>- Semua Stok Barang</b><br/>
-                                    <b>- Semua Riwayat Transaksi</b><br/>
-                                    <b>- Semua Faktur & Supplier</b><br/>
-                                    (Pengaturan Toko tidak dihapus)
-                                </p>
-                                
+                                <p className="text-center text-sm text-slate-600 mb-4">Semua stok dan transaksi akan dihapus.</p>
                                 <div className="bg-red-50 p-3 rounded-lg border border-red-200 mb-4">
-                                    <label className="text-[10px] font-bold text-red-500 uppercase block mb-1">Ketik kata "RESET" untuk konfirmasi</label>
+                                    <label className="text-[10px] font-bold text-red-500 uppercase block mb-1">Ketik "RESET"</label>
                                     <input autoFocus type="text" className="w-full p-2 text-center font-black tracking-widest border-2 border-red-300 rounded focus:border-red-600 outline-none uppercase" placeholder="RESET" value={resetInput} onChange={e => setResetInput(e.target.value.toUpperCase())} />
                                 </div>
-
                                 <div className="flex gap-3">
                                     <button onClick={() => { setShowResetModal(false); setResetInput(""); }} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold text-sm hover:bg-slate-50">Batal</button>
-                                    <button onClick={handleResetDatabase} disabled={isResetting || resetInput !== 'RESET'} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold text-sm shadow-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2">
-                                        {isResetting ? <div className="typing-dot bg-white"></div> : <><Icon name="trash" /> HAPUS</>}
-                                    </button>
+                                    <button onClick={handleResetDatabase} disabled={isResetting || resetInput !== 'RESET'} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold text-sm shadow-lg hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">{isResetting ? <div className="typing-dot bg-white"></div> : 'HAPUS'}</button>
                                 </div>
                             </div>
                         </div>
                     )}
-
                  </div>
             );
         };
 
-        // --- PURCHASE VIEW (NEW FEATURE) ---
+        // --- PURCHASE VIEW (UNCHANGED) ---
         const PurchaseView = ({ user, showToast }) => {
             const [purchases, setPurchases] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
@@ -714,7 +752,7 @@
             );
         };
 
-        // --- CASHIER COMPONENT ---
+        // --- CASHIER COMPONENT (UPDATED PRINT LOGIC) ---
         const CashierView = ({ items, user, showToast, settings, onGenerateImage, currentProfile }) => {
             const [isSessionActive, setIsSessionActive] = useState(false);
             const [search, setSearch] = useState('');
@@ -877,8 +915,17 @@
             };
 
             const handleCloseSuccess = () => { setCheckoutModal(false); setPaymentSuccess(false); setReceiptData(null); setCart([]); setPaymentAmount(''); setIsSessionActive(false); };
+            
             const handlePrintAction = async () => { 
-                const printSettings = { ...settings, storeName: currentProfile.name, storeAddress: currentProfile.address };
+                // CONSTRUCT SETTINGS BASED ON CURRENT PROFILE
+                const printSettings = { 
+                    ...settings, 
+                    storeName: currentProfile.name, 
+                    storeAddress: currentProfile.address,
+                    receiptFooter: currentProfile.footer || settings.receiptFooter,
+                    additionalHeaders: currentProfile.additionalHeaders || []
+                };
+                
                 const connected = await printReceipt(receiptData, btDevice, printSettings); 
                 if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak / Bluetooth Mati", "error"); } 
             };
@@ -932,7 +979,7 @@
             );
         };
 
-        // --- UPDATED: HISTORY VIEW ---
+        // --- HISTORY VIEW (UPDATED PRINT LOGIC) ---
         const HistoryView = ({ user, showToast, settings, onGenerateImage, currentProfile }) => {
             const [transactions, setTransactions] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -954,7 +1001,6 @@
                 const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions'), window.orderBy('date', 'desc'), window.limit(500));
                 const unsub = window.onSnapshot(q, (snapshot) => { 
                     const allTx = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // FILTER: Hanya tampilkan transaksi milik toko ini ATAU semua jika mode all_stores
                     let filteredTx = allTx;
                     if (currentProfile.id !== 'all_stores') {
                          filteredTx = allTx.filter(t => t.storeId === currentProfile.id || t.storeName === currentProfile.name);
@@ -1003,8 +1049,6 @@
                 setProcessingRetur(true);
                 try {
                     const batch = window.writeBatch(window.db);
-                    
-                    // RETUR KE STOK TOKO YANG MELAKUKAN TRANSAKSI
                     const storeIdToReturn = tx.storeId || 'default';
                     const invRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
                     const stockField = `stocks.${storeIdToReturn}`;
@@ -1025,7 +1069,18 @@
             };
 
             const handlePrint = async (tx) => { 
-                const printSettings = { ...settings, storeName: tx.storeName || currentProfile.name, storeAddress: (tx.storeName === currentProfile.name ? currentProfile.address : settings.storeAddress) };
+                // LOOKUP PROFILE FOR THIS TRANSACTION
+                const storeProfiles = settings.storeProfiles || [];
+                const txProfile = storeProfiles.find(p => p.id === tx.storeId) || storeProfiles[0] || {};
+                
+                const printSettings = { 
+                    ...settings, 
+                    storeName: txProfile.name || settings.storeName, 
+                    storeAddress: txProfile.address || settings.storeAddress,
+                    receiptFooter: txProfile.footer || settings.receiptFooter,
+                    additionalHeaders: txProfile.additionalHeaders || []
+                };
+                
                 const connected = await printReceipt(tx, btDevice, printSettings); 
                 if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak", "error"); } 
             };
@@ -1115,14 +1170,12 @@
                         const batch = window.writeBatch(window.db);
                         chunks[i].forEach(item => {
                             const docRef = window.doc(collectionRef);
-                            // --- FIX: STRUCTURE DATA CORRECTLY ---
                             batch.set(docRef, {
                                 name: item.name,
                                 unit: item.unit,
                                 rack: item.rack,
                                 exp: item.exp,
                                 price: item.price,
-                                // Key Fix: Store stocks as a map, NOT a string key
                                 stocks: { [currentProfile.id]: item.qty }, 
                                 qty: item.qty, // Legacy fallback
                                 createdAt: window.serverTimestamp(),
@@ -1340,11 +1393,9 @@
                     <div className="relative group z-10"><input type="text" placeholder="Cari nama barang..." className="w-full pl-9 pr-3 py-3 rounded-xl border-0 bg-white/90 backdrop-blur-sm shadow-soft ring-1 ring-slate-100 outline-none transition-all placeholder:text-slate-400 font-medium text-sm focus:ring-2 focus:ring-sky-500" defaultValue={searchQuery} onChange={e => debouncedSetSearchQuery(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm transition-colors group-focus-within:text-slate-600" /></div>
                     <div className="flex-1 overflow-y-auto pb-32 pr-1 custom-scrollbar">
                         {loading ? (<div className="flex flex-col items-center justify-center py-20"><div className="typing-dot bg-sky-500"></div><p className="text-xs text-slate-400 mt-2">Menghubungkan Database...</p></div>) : filteredItems.length === 0 ? (<div className="flex flex-col items-center justify-center py-20 opacity-40"><div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3"><Icon name="box-open" className="text-2xl text-slate-400" /></div><p className="font-semibold text-slate-500 text-center text-sm">Tidak ada data</p></div>) : (<><div className="space-y-2">{displayedItems.map((item, index) => { const threshold = item.minStock ? safeNumber(item.minStock) : lowStockThreshold; const isLow = safeNumber(item.qty) < threshold; const isNew = isNewItem(item.createdAt); const animDelay = `${index * 50}ms`; const nameClass = searchQuery ? "type-effect-wrapper" : ""; const daysLeft = getDaysRemaining(item.exp); const isExpired = daysLeft !== null && daysLeft < 0; const isNearExp = daysLeft !== null && daysLeft < 90 && !isExpired; const expColor = isExpired ? 'text-red-600' : (isNearExp ? 'text-amber-600' : 'text-slate-400'); const expIcon = isExpired ? 'triangle-exclamation' : 'calendar-days'; return (<div key={item.id + searchQuery} style={{ animationDelay: animDelay }} className={`slide-up bg-white/90 backdrop-blur-sm rounded-xl p-3 border shadow-sm transition-all card-hover group flex items-center justify-between gap-3 ${isLow ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100 hover:border-slate-300'}`}><div className="flex items-center gap-3 flex-1 min-w-0"><div className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm shadow-sm ${isLow ? 'bg-amber-100 text-amber-600' : 'bg-sky-50 text-sky-600'}`}><Icon name={isLow ? 'triangle-exclamation' : 'pills'} /></div><div className="min-w-0"><div className="flex items-start gap-2"><h4 className={`font-bold text-slate-800 text-xs leading-snug whitespace-normal break-words ${nameClass}`}>{item.name}</h4>{isNew && <span className="bg-rose-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-sm animate-pulse shadow-sm flex-shrink-0 mt-0.5">NEW</span>}</div><div className="mt-1 flex flex-col gap-0.5"><span className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-400"><Icon name="location-dot" className="text-[8px]" /> {item.rack || '-'}</span>{item.exp && (<span className={`inline-flex items-center gap-1 text-[9px] font-bold ${expColor}`}><Icon name={expIcon} className="text-[8px]" /> {formatDateIndo(item.exp)}</span>)}
-                            {/* Rincian Stok Gabungan - Tampilan Baru Berbaris (Fixed for Truncate issue) */}
                             {currentProfile.id === 'all_stores' && item._breakdown && item._breakdown.length > 0 && (
                                 <div className="mt-2 flex flex-col gap-1 w-full">
                                     {item._breakdown.map((info, idx) => {
-                                        // Handle splitting carefully in case name has colon, though assuming safe split for now based on generation logic
                                         const separatorIndex = info.lastIndexOf(':');
                                         const storeName = info.substring(0, separatorIndex).trim();
                                         const storeQty = info.substring(separatorIndex + 1).trim();
@@ -1457,7 +1508,7 @@
                 const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory'));
                 const unsubscribeSnapshot = window.onSnapshot(q, (snapshot) => {
                     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setRawInventory(data); // Save raw data
+                    setRawInventory(data); 
                     setLoading(false);
                 }, (error) => { console.error("Firestore Error:", error); showToast("Gagal memuat data live", "error"); });
                 return () => unsubscribeSnapshot();
@@ -1465,28 +1516,20 @@
 
             // 3. Process Inventory based on Active Store (Updated for All Stores logic)
             useEffect(() => {
-                // Map raw inventory to display inventory based on selected store
                 const processed = rawInventory.map(item => {
                     let displayQty = 0;
                     let breakdown = [];
                     
                     if (activeStoreId === 'all_stores') {
-                        // Logic untuk Total Gabungan
                         const profiles = settingsData.storeProfiles || [{id: 'default', name: APP_NAME}];
                         let total = 0;
-                        
                         profiles.forEach(p => {
-                            const q = (item.stocks && item.stocks[p.id] !== undefined) ? item.stocks[p.id] : 
-                                      (p.id === 'default' ? (item.qty || 0) : 0);
-                            
+                            const q = (item.stocks && item.stocks[p.id] !== undefined) ? item.stocks[p.id] : (p.id === 'default' ? (item.qty || 0) : 0);
                             total += q;
-                            // Push semua data toko walaupun quantity 0
                             breakdown.push(`${p.name}: ${q}`);
                         });
-                        
                         displayQty = total;
                     } else {
-                        // Logic Single Store
                         if (item.stocks && item.stocks[activeStoreId] !== undefined) {
                             displayQty = item.stocks[activeStoreId];
                         } else if (activeStoreId === 'default') {
@@ -1496,12 +1539,7 @@
                         }
                     }
 
-                    return {
-                        ...item,
-                        qty: displayQty, // Override qty for display/logic
-                        _originalQty: item.qty, // Keep ref just in case
-                        _breakdown: breakdown // Simpan data rincian toko
-                    };
+                    return { ...item, qty: displayQty, _originalQty: item.qty, _breakdown: breakdown };
                 });
                 processed.sort((a, b) => a.name.localeCompare(b.name));
                 setInventoryData(processed);
@@ -1533,7 +1571,22 @@
             const showToast = useCallback((message, type = "success") => { setToast({ show: true, message, type }); setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000); }, []);
 
             const handleGenerateImage = async (transaction) => {
-                setIsGeneratingImage(true); setReceiptToPrint(transaction); showToast("Membuat gambar struk...");
+                setIsGeneratingImage(true); 
+                
+                // Get profile for receipt display (fallback to current if not in tx)
+                const storeProfiles = settingsData.storeProfiles || [];
+                const txProfile = storeProfiles.find(p => p.id === transaction.storeId) || storeProfiles[0] || {};
+                
+                // Pass correct details to the receipt hidden container via receiptToPrint
+                setReceiptToPrint({
+                     ...transaction,
+                     storeName: txProfile.name || settingsData.storeName,
+                     storeAddress: txProfile.address || settingsData.storeAddress,
+                     footer: txProfile.footer || settingsData.receiptFooter,
+                     headers: txProfile.additionalHeaders || []
+                }); 
+                
+                showToast("Membuat gambar struk...");
                 setTimeout(async () => {
                     const element = document.getElementById('receipt-hidden-container');
                     if (!element) { showToast("Gagal menemukan elemen struk", "error"); setIsGeneratingImage(false); return; }
@@ -1556,11 +1609,8 @@
                 setSubmitting(true);
                 try {
                     const collectionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory');
-                    
-                    // Logic to update specific store stock
                     const newQty = safeNumber(formData.qty);
                     
-                    // Base data (shared)
                     const baseData = {
                         name: formData.name,
                         unit: formData.unit || 'Pcs',
@@ -1571,34 +1621,20 @@
                         updatedAt: window.serverTimestamp()
                     };
 
-                    // Specific stock data using dot notation for map update
-                    const stockUpdate = {
-                        [`stocks.${activeStoreId}`]: newQty
-                    };
+                    const stockUpdate = { [`stocks.${activeStoreId}`]: newQty };
 
                     if (editingItem) {
                         const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', editingItem.id);
                         await window.updateDoc(docRef, { ...baseData, ...stockUpdate }); 
                         showToast(`Stok untuk ${currentProfile.name} diperbarui`);
                     } else {
-                        // Check if item exists by name (case insensitive) to allow shared item usage
                         const existingItem = rawInventory.find(i => i.name.toLowerCase() === formData.name.toLowerCase());
-                        
                         if (existingItem) {
-                            // Update existing item with new stock for this store
                              const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', existingItem.id);
                              await window.updateDoc(docRef, { ...baseData, ...stockUpdate });
                              showToast(`Barang sudah ada. Stok ${currentProfile.name} diupdate.`);
                         } else {
-                            // Create new item
-                            // We initialize 'stocks' map with current store's qty
-                            // We also keep 'qty' for legacy support/default view if needed
-                            await window.addDoc(collectionRef, { 
-                                ...baseData, 
-                                stocks: { [activeStoreId]: newQty },
-                                qty: newQty, // Legacy field fallback
-                                createdAt: window.serverTimestamp() 
-                            }); 
+                            await window.addDoc(collectionRef, { ...baseData, stocks: { [activeStoreId]: newQty }, qty: newQty, createdAt: window.serverTimestamp() }); 
                             showToast("Barang baru ditambahkan");
                         }
                     }
@@ -1615,7 +1651,7 @@
             return (
                 <div className={`min-h-screen flex flex-col md:flex-row bg-sky-50/50 transition-colors duration-500 ${activeStoreId === 'all_stores' ? 'theme-all-stores' : ''}`}>
                     <RamadhanDecor /> <Toast show={toast.show} message={toast.message} type={toast.type} /> {isSidebarOpen && (<div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm fade-in" onClick={() => setIsSidebarOpen(false)}></div>)}
-                    {receiptToPrint && ( <div style={{ position: 'fixed', top: '-9999px', left: '-9999px', zIndex: -1 }}> <div id="receipt-hidden-container" className="bg-white p-6 w-[380px] text-black font-mono shadow-none" style={{ fontFamily: '"Courier New", Courier, monospace' }}> <div className="text-center mb-4"> <h2 className="text-xl font-bold uppercase">{receiptToPrint.storeName || settingsData.storeName || APP_NAME}</h2> <p className="text-sm text-gray-600"> {receiptToPrint.storeName === currentProfile.name ? currentProfile.address : (settingsData.storeAddress || "Indonesia")} </p> {(settingsData.additionalHeaders || []).map((h, i) => <p key={i} className="text-sm text-gray-600">{h}</p>)} {settingsData.storeHeader3 && !settingsData.additionalHeaders?.length && <p className="text-sm text-gray-600">{settingsData.storeHeader3}</p>} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between text-xs mb-1"> <span>Tgl: {new Date(receiptToPrint.date.seconds ? receiptToPrint.date.toDate() : receiptToPrint.date).toLocaleString('id-ID')}</span> </div> <div className="flex justify-between text-xs mb-2"> <span>Ref: {receiptToPrint.id ? receiptToPrint.id.slice(-8).toUpperCase() : '-'}</span> <span>Kasir: {receiptToPrint.cashierName || 'Admin'}</span> </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="space-y-2 mb-4"> {receiptToPrint.items.map((item, idx) => { const validQty = item.cartQty - (item.returnedQty || 0); if (validQty <= 0) return null; return ( <div key={idx} className="text-sm"> <div className="font-bold">{item.name}</div> <div className="flex justify-between"> <span>{validQty} x {formatRupiah(item.price)}</span> <span>{formatRupiah(validQty * item.price)}</span> </div> </div> ); })} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between font-bold text-lg mb-1"> <span>TOTAL</span> <span>{formatRupiah(receiptToPrint.items.reduce((acc, item) => acc + (item.price * (item.cartQty - (item.returnedQty || 0))), 0))}</span> </div> {receiptToPrint.pay !== undefined && ( <div className="flex justify-between text-sm"> <span>Tunai</span> <span>{formatRupiah(receiptToPrint.pay)}</span> </div> )} {receiptToPrint.change !== undefined && ( <div className="flex justify-between text-sm"> <span>Kembali</span> <span>{formatRupiah(receiptToPrint.change)}</span> </div> )} <div className="border-b-2 border-dashed border-gray-300 my-4"></div> <div className="text-center text-xs text-gray-500 whitespace-pre-wrap"> {settingsData.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar"} </div> {receiptToPrint.status === 'returned' && <div className="mt-4 text-center font-bold text-xl text-red-600 border-2 border-red-600 p-2 transform -rotate-12">TRANSAKSI DIBATALKAN</div>} {receiptToPrint.status === 'partial' && <div className="mt-4 text-center font-bold text-sm text-amber-600">*** ADA RETUR SEBAGIAN ***</div>} </div> </div> )}
+                    {receiptToPrint && ( <div style={{ position: 'fixed', top: '-9999px', left: '-9999px', zIndex: -1 }}> <div id="receipt-hidden-container" className="bg-white p-6 w-[380px] text-black font-mono shadow-none" style={{ fontFamily: '"Courier New", Courier, monospace' }}> <div className="text-center mb-4"> <h2 className="text-xl font-bold uppercase">{receiptToPrint.storeName || APP_NAME}</h2> <p className="text-sm text-gray-600"> {receiptToPrint.storeAddress || "Indonesia"} </p> {(receiptToPrint.headers || []).map((h, i) => <p key={i} className="text-sm text-gray-600">{h}</p>)} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between text-xs mb-1"> <span>Tgl: {new Date(receiptToPrint.date.seconds ? receiptToPrint.date.toDate() : receiptToPrint.date).toLocaleString('id-ID')}</span> </div> <div className="flex justify-between text-xs mb-2"> <span>Ref: {receiptToPrint.id ? receiptToPrint.id.slice(-8).toUpperCase() : '-'}</span> <span>Kasir: {receiptToPrint.cashierName || 'Admin'}</span> </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="space-y-2 mb-4"> {receiptToPrint.items.map((item, idx) => { const validQty = item.cartQty - (item.returnedQty || 0); if (validQty <= 0) return null; return ( <div key={idx} className="text-sm"> <div className="font-bold">{item.name}</div> <div className="flex justify-between"> <span>{validQty} x {formatRupiah(item.price)}</span> <span>{formatRupiah(validQty * item.price)}</span> </div> </div> ); })} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between font-bold text-lg mb-1"> <span>TOTAL</span> <span>{formatRupiah(receiptToPrint.items.reduce((acc, item) => acc + (item.price * (item.cartQty - (item.returnedQty || 0))), 0))}</span> </div> {receiptToPrint.pay !== undefined && ( <div className="flex justify-between text-sm"> <span>Tunai</span> <span>{formatRupiah(receiptToPrint.pay)}</span> </div> )} {receiptToPrint.change !== undefined && ( <div className="flex justify-between text-sm"> <span>Kembali</span> <span>{formatRupiah(receiptToPrint.change)}</span> </div> )} <div className="border-b-2 border-dashed border-gray-300 my-4"></div> <div className="text-center text-xs text-gray-500 whitespace-pre-wrap"> {receiptToPrint.footer || "Terima Kasih\nBarang tidak dapat ditukar"} </div> {receiptToPrint.status === 'returned' && <div className="mt-4 text-center font-bold text-xl text-red-600 border-2 border-red-600 p-2 transform -rotate-12">TRANSAKSI DIBATALKAN</div>} {receiptToPrint.status === 'partial' && <div className="mt-4 text-center font-bold text-sm text-amber-600">*** ADA RETUR SEBAGIAN ***</div>} </div> </div> )}
 
                     <aside className={`fixed top-0 left-0 h-full z-50 w-72 md:w-80 bg-white/95 backdrop-blur-xl md:backdrop-blur-md border-r border-slate-200 md:border-white/20 shadow-2xl md:shadow-soft transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                         <div className="p-6 pb-4 h-full flex flex-col">
@@ -1636,7 +1672,6 @@
                                                             <span className="truncate">{profile.name}</span>{activeStoreId === profile.id && <Icon name="check" className="text-xs" />}
                                                         </button>
                                                     ))}
-                                                    {/* OPSI SEMUA TOKO JIKA ADA LEBIH DARI 1 TOKO */}
                                                     {(settingsData.storeProfiles && settingsData.storeProfiles.length > 1) && (
                                                         <button onClick={() => handleSwitchStore('all_stores')} className={`w-full text-left px-4 py-3 text-sm font-bold flex items-center justify-between hover:bg-indigo-50 transition-colors border-t border-slate-100 ${activeStoreId === 'all_stores' ? 'text-indigo-600 bg-indigo-50' : 'text-slate-700'}`}>
                                                             <span className="truncate">Semua Toko (Gabungan)</span>{activeStoreId === 'all_stores' && <Icon name="check" className="text-xs" />}
@@ -1651,7 +1686,7 @@
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.0 (Reset DB) • Rafa Medica Update</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.0 (Multi Struk)</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
