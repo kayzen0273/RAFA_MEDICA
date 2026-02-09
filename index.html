@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V25 - Multi Struk)</title>
+    <title>Sistem Kasir Rafa Medica (V25.5 - Excel Fix)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -64,7 +64,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi Baru: Rafa Medica (stok-barang-49c8e)
         const userConfig = {
@@ -105,6 +105,7 @@
         window.orderBy = orderBy;
         window.increment = increment; 
         window.limit = limit;
+        window.where = where;
         window.appId = appId;
         window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
     </script>
@@ -116,9 +117,11 @@
         ::-webkit-scrollbar-track { background: transparent; }
         .fade-in { animation: fadeIn 0.4s ease-out; }
         .slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+        .slide-left { animation: slideLeft 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         .pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes slideLeft { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes popIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
         .typing-dot { height: 6px; width: 6px; background-color: #0ea5e9; border-radius: 50%; display: inline-block; animation: typing 1.4s infinite ease-in-out both; margin: 0 2px; }
         .typing-dot:nth-child(1) { animation-delay: -0.32s; }
@@ -166,12 +169,27 @@
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         const APP_NAME = "Rafa Medica";
         
+        // --- GLOBAL LOGGING UTILITY ---
+        const logToDB = async (type, message, storeId, userEmail) => {
+            try {
+                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'activity_logs'), {
+                    type: type, // 'TRANSAKSI', 'STOK', 'TRANSFER', 'SYSTEM', 'RETUR'
+                    message: message,
+                    storeId: storeId || 'unknown',
+                    user: userEmail || 'Anonim',
+                    createdAt: window.serverTimestamp()
+                });
+            } catch (error) {
+                console.error("Gagal mencatat log:", error);
+            }
+        };
+
         // --- DEFAULT SETTINGS ---
         const DEFAULT_SETTINGS = {
             lowStockThreshold: 5,
-            storeName: APP_NAME, // Fallback Global
-            storeAddress: "Indonesia", // Fallback Global
-            receiptFooter: "Terima Kasih\nBarang tidak dapat ditukar", // Fallback Global
+            storeName: APP_NAME, 
+            storeAddress: "Indonesia", 
+            receiptFooter: "Terima Kasih\nBarang tidak dapat ditukar", 
             storeProfiles: [
                 { 
                     id: 'default', 
@@ -340,6 +358,138 @@
             );
         };
 
+        // --- NOTIFICATION CENTER COMPONENT (DIPISAH PER TOKO) ---
+        const NotificationCenter = ({ isOpen, onClose, user, currentProfile }) => {
+            const [logs, setLogs] = useState([]);
+            const [filterDate, setFilterDate] = useState('');
+            const [filterType, setFilterType] = useState('ALL'); // ALL, TRANSAKSI, STOK, TRANSFER, RETUR
+            
+            useEffect(() => {
+                if (!user || !isOpen) return;
+
+                // Query last 200 logs globally to ensure we have enough data to filter
+                // Filtering client-side to avoid "missing index" errors for end users
+                const q = window.query(
+                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'activity_logs'),
+                    window.orderBy('createdAt', 'desc'),
+                    window.limit(200)
+                );
+                
+                const unsub = window.onSnapshot(q, (snapshot) => {
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                    // FILTER PER TOKO (CLIENT SIDE)
+                    let storeLogs = data;
+                    if (currentProfile && currentProfile.id !== 'all_stores') {
+                        storeLogs = data.filter(log => log.storeId === currentProfile.id);
+                    }
+
+                    setLogs(storeLogs);
+                });
+                
+                return () => unsub();
+            }, [user, isOpen, currentProfile]); // Re-run when profile changes
+
+            const filteredLogs = useMemo(() => {
+                return logs.filter(log => {
+                    let matchesDate = true;
+                    if (filterDate) {
+                        const logDate = log.createdAt?.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
+                        const filterD = new Date(filterDate);
+                        matchesDate = logDate.getDate() === filterD.getDate() && 
+                                      logDate.getMonth() === filterD.getMonth() && 
+                                      logDate.getFullYear() === filterD.getFullYear();
+                    }
+                    
+                    let matchesType = true;
+                    if (filterType !== 'ALL') {
+                        matchesType = log.type === filterType;
+                    }
+                    
+                    return matchesDate && matchesType;
+                });
+            }, [logs, filterDate, filterType]);
+
+            const getIconForType = (type) => {
+                switch(type) {
+                    case 'TRANSAKSI': return 'cart-shopping text-green-500 bg-green-50';
+                    case 'STOK': return 'box-open text-sky-500 bg-sky-50';
+                    case 'TRANSFER': return 'arrow-right-arrow-left text-indigo-500 bg-indigo-50';
+                    case 'RETUR': return 'rotate-left text-amber-500 bg-amber-50';
+                    case 'HAPUS': return 'trash text-red-500 bg-red-50';
+                    default: return 'bell text-slate-500 bg-slate-50';
+                }
+            };
+
+            return (
+                <div className={`fixed inset-y-0 right-0 z-[150] w-full md:w-96 bg-white shadow-2xl transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+                    <div className="flex flex-col h-full">
+                        <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                            <div>
+                                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                                    <Icon name="bell" className="text-sky-600" /> Aktivitas
+                                </h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                                    {currentProfile?.id === 'all_stores' ? 'Semua Cabang' : currentProfile?.name}
+                                </p>
+                            </div>
+                            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500">
+                                <Icon name="xmark" />
+                            </button>
+                        </div>
+                        
+                        <div className="p-4 bg-white border-b border-slate-100 space-y-2">
+                            <div className="flex gap-2">
+                                <input type="date" className="flex-1 p-2 border border-slate-200 rounded-lg text-xs font-bold" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
+                                <button onClick={() => { setFilterDate(''); setFilterType('ALL'); }} className="px-3 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs font-bold hover:bg-slate-200">Reset</button>
+                            </div>
+                            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                                {['ALL', 'TRANSAKSI', 'STOK', 'TRANSFER', 'RETUR', 'HAPUS'].map(type => (
+                                    <button 
+                                        key={type} 
+                                        onClick={() => setFilterType(type)}
+                                        className={`px-3 py-1.5 rounded-full text-[10px] font-bold whitespace-nowrap border transition-all ${filterType === type ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'}`}
+                                    >
+                                        {type === 'ALL' ? 'Semua' : type}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                            {filteredLogs.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                                    <Icon name="clipboard-list" className="text-4xl mb-2" />
+                                    <p className="text-xs">Tidak ada aktivitas tercatat.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {filteredLogs.map(log => {
+                                        const iconClass = getIconForType(log.type);
+                                        const date = log.createdAt?.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
+                                        return (
+                                            <div key={log.id} className="p-3 bg-white border border-slate-100 rounded-xl hover:shadow-sm transition-all flex gap-3">
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${iconClass}`}>
+                                                    <Icon name={iconClass.split(' ')[0]} />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-xs font-bold text-slate-800 line-clamp-2">{log.message}</p>
+                                                    <div className="flex justify-between items-center mt-1">
+                                                        <span className="text-[10px] text-slate-400">{date.toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})} • {date.toLocaleDateString('id-ID')}</span>
+                                                        <span className="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-medium truncate max-w-[80px]">{log.user.split('@')[0]}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- HELPERS FOR PRINTER (GLOBAL) ---
         const connectBluetooth = async () => {
             try {
@@ -357,7 +507,6 @@
                 const characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
                 const encoder = new ThermalPrinterEncoder();
                 
-                // --- GUNAKAN DATA DARI PROFILE SPESIFIK JIKA ADA ---
                 const storeName = settings.storeName || APP_NAME;
                 const storeAddr = settings.storeAddress || "Indonesia";
                 const footerText = settings.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar";
@@ -398,20 +547,13 @@
             } catch (error) { console.error("Print Error", error); return false; }
         };
 
-        // --- UPDATED SETTINGS COMPONENT (MULTI STORE RECEIPT) ---
         const SettingsView = ({ settings, onSave, loading }) => {
             const [localSettings, setLocalSettings] = useState(settings);
             const [profiles, setProfiles] = useState(() => settings.storeProfiles || [{ id: 'default', name: settings.storeName || APP_NAME, address: settings.storeAddress || '', footer: settings.receiptFooter, additionalHeaders: settings.additionalHeaders || [] }]);
-            
-            // Edit Mode
             const [selectedProfileId, setSelectedProfileId] = useState(profiles[0]?.id || 'default');
             const activeProfile = profiles.find(p => p.id === selectedProfileId) || profiles[0];
-
-            // State for Adding Store
             const [isAddingStore, setIsAddingStore] = useState(false);
             const [newStoreName, setNewStoreName] = useState("");
-
-            // Reset DB State
             const [showResetModal, setShowResetModal] = useState(false);
             const [resetInput, setResetInput] = useState("");
             const [isResetting, setIsResetting] = useState(false);
@@ -419,7 +561,6 @@
             useEffect(() => { 
                 setLocalSettings(settings); 
                 if(settings.storeProfiles) {
-                    // Ensure backward compatibility
                     const enhancedProfiles = settings.storeProfiles.map(p => ({
                         ...p,
                         footer: p.footer || settings.receiptFooter || "Terima Kasih\nBarang tidak dapat ditukar",
@@ -429,93 +570,14 @@
                 }
             }, [settings]);
             
-            // Helper to update specific profile
-            const updateProfile = (id, field, value) => {
-                const updatedProfiles = profiles.map(p => {
-                    if (p.id === id) return { ...p, [field]: value };
-                    return p;
-                });
-                setProfiles(updatedProfiles);
-            };
-
-            const handleHeaderChange = (profileId, idx, val) => {
-                const profile = profiles.find(p => p.id === profileId);
-                const newHeaders = [...(profile.additionalHeaders || [])];
-                newHeaders[idx] = val;
-                updateProfile(profileId, 'additionalHeaders', newHeaders);
-            };
-
-            const addHeader = (profileId) => {
-                const profile = profiles.find(p => p.id === profileId);
-                const newHeaders = [...(profile.additionalHeaders || []), ""];
-                updateProfile(profileId, 'additionalHeaders', newHeaders);
-            };
-
-            const removeHeader = (profileId, idx) => {
-                const profile = profiles.find(p => p.id === profileId);
-                const newHeaders = (profile.additionalHeaders || []).filter((_, i) => i !== idx);
-                updateProfile(profileId, 'additionalHeaders', newHeaders);
-            };
-
-            const handleAddNewStore = () => {
-                if (!newStoreName.trim()) return;
-                const newId = 'store_' + Date.now();
-                const newProfile = {
-                    id: newId,
-                    name: newStoreName,
-                    address: "Indonesia",
-                    footer: "Terima Kasih",
-                    additionalHeaders: []
-                };
-                setProfiles([...profiles, newProfile]);
-                setNewStoreName("");
-                setIsAddingStore(false);
-                setSelectedProfileId(newId);
-            };
-
-            const removeProfile = (id) => {
-                if (profiles.length <= 1) { alert("Minimal harus ada 1 profil toko."); return; }
-                if (!confirm("Hapus toko ini? Data stok mungkin masih tersimpan tapi tidak bisa diakses.")) return;
-                const newProfiles = profiles.filter(p => p.id !== id);
-                setProfiles(newProfiles);
-                if (selectedProfileId === id) setSelectedProfileId(newProfiles[0].id);
-            };
-
-            const handleSave = () => {
-                // Simpan storeProfiles yang baru ke settings global
-                // Juga update fallback global values dengan profile pertama (untuk backward compatibility)
-                const mainProfile = profiles[0];
-                onSave({ 
-                    ...localSettings,
-                    storeName: mainProfile.name,
-                    storeAddress: mainProfile.address,
-                    receiptFooter: mainProfile.footer,
-                    additionalHeaders: mainProfile.additionalHeaders,
-                    storeProfiles: profiles 
-                }); 
-            };
-            
-            // DANGER ZONE HANDLERS
-            const handleResetDatabase = async () => {
-                if (resetInput !== 'RESET') { alert("Mohon ketik kata RESET dengan benar."); return; }
-                if(!confirm("PERINGATAN TERAKHIR: Apakah Anda yakin? Semua data stok dan transaksi akan HILANG SELAMANYA.")) return;
-
-                setIsResetting(true);
-                const collectionsToClear = ['inventory', 'transactions', 'purchases', 'suppliers', 'pending_carts'];
-                try {
-                    let totalDeleted = 0;
-                    for (const colName of collectionsToClear) {
-                        const colRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', colName);
-                        const snapshot = await window.getDocs(colRef);
-                        const batch = window.writeBatch(window.db);
-                        snapshot.docs.forEach(doc => batch.delete(doc.ref));
-                        await batch.commit();
-                        totalDeleted += snapshot.docs.length;
-                    }
-                    alert(`Database Berhasil Direset! ${totalDeleted} dokumen dihapus.`);
-                    setShowResetModal(false); setResetInput(""); window.location.reload();
-                } catch (error) { console.error("Reset Error:", error); alert("Gagal mereset database."); } finally { setIsResetting(false); }
-            };
+            const updateProfile = (id, field, value) => { const updatedProfiles = profiles.map(p => { if (p.id === id) return { ...p, [field]: value }; return p; }); setProfiles(updatedProfiles); };
+            const handleHeaderChange = (profileId, idx, val) => { const profile = profiles.find(p => p.id === profileId); const newHeaders = [...(profile.additionalHeaders || [])]; newHeaders[idx] = val; updateProfile(profileId, 'additionalHeaders', newHeaders); };
+            const addHeader = (profileId) => { const profile = profiles.find(p => p.id === profileId); const newHeaders = [...(profile.additionalHeaders || []), ""]; updateProfile(profileId, 'additionalHeaders', newHeaders); };
+            const removeHeader = (profileId, idx) => { const profile = profiles.find(p => p.id === profileId); const newHeaders = (profile.additionalHeaders || []).filter((_, i) => i !== idx); updateProfile(profileId, 'additionalHeaders', newHeaders); };
+            const handleAddNewStore = () => { if (!newStoreName.trim()) return; const newId = 'store_' + Date.now(); const newProfile = { id: newId, name: newStoreName, address: "Indonesia", footer: "Terima Kasih", additionalHeaders: [] }; setProfiles([...profiles, newProfile]); setNewStoreName(""); setIsAddingStore(false); setSelectedProfileId(newId); };
+            const removeProfile = (id) => { if (profiles.length <= 1) { alert("Minimal harus ada 1 profil toko."); return; } if (!confirm("Hapus toko ini? Data stok mungkin masih tersimpan tapi tidak bisa diakses.")) return; const newProfiles = profiles.filter(p => p.id !== id); setProfiles(newProfiles); if (selectedProfileId === id) setSelectedProfileId(newProfiles[0].id); };
+            const handleSave = () => { const mainProfile = profiles[0]; onSave({ ...localSettings, storeName: mainProfile.name, storeAddress: mainProfile.address, receiptFooter: mainProfile.footer, additionalHeaders: mainProfile.additionalHeaders, storeProfiles: profiles }); };
+            const handleResetDatabase = async () => { if (resetInput !== 'RESET') { alert("Mohon ketik kata RESET dengan benar."); return; } if(!confirm("PERINGATAN TERAKHIR: Apakah Anda yakin? Semua data stok dan transaksi akan HILANG SELAMANYA.")) return; setIsResetting(true); const collectionsToClear = ['inventory', 'transactions', 'purchases', 'suppliers', 'pending_carts', 'activity_logs']; try { let totalDeleted = 0; for (const colName of collectionsToClear) { const colRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', colName); const snapshot = await window.getDocs(colRef); const batch = window.writeBatch(window.db); snapshot.docs.forEach(doc => batch.delete(doc.ref)); await batch.commit(); totalDeleted += snapshot.docs.length; } alert(`Database Berhasil Direset! ${totalDeleted} dokumen dihapus.`); setShowResetModal(false); setResetInput(""); window.location.reload(); } catch (error) { console.error("Reset Error:", error); alert("Gagal mereset database."); } finally { setIsResetting(false); } };
 
             return (
                  <div className="fade-in max-w-4xl mx-auto w-full pt-4 md:pt-10 pb-20">
@@ -524,132 +586,25 @@
                             <div className="w-12 h-12 bg-slate-800 text-white rounded-2xl flex items-center justify-center text-xl shadow-sm"><Icon name="gears" /></div>
                             <div><h2 className="text-xl font-bold text-slate-800">Pengaturan Toko & Struk</h2><p className="text-xs text-slate-400">Atur profil cabang dan format cetak masing-masing</p></div>
                         </header>
-                        
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {/* Left Sidebar: Store List */}
                             <div className="md:col-span-1 space-y-3">
-                                <div className="flex justify-between items-center mb-2">
-                                    <h3 className="font-bold text-slate-700 text-sm">Daftar Toko</h3>
-                                    <button onClick={() => setIsAddingStore(true)} className="text-[10px] bg-sky-50 text-sky-600 px-2 py-1 rounded-lg font-bold border border-sky-100 hover:bg-sky-100">+ Tambah</button>
-                                </div>
-                                
-                                {isAddingStore && (
-                                    <div className="p-3 bg-sky-50 rounded-xl border border-sky-200 mb-2 animate-slide-up">
-                                        <label className="text-[10px] font-bold text-sky-700 block mb-1">Nama Toko Baru</label>
-                                        <input autoFocus type="text" value={newStoreName} onChange={e => setNewStoreName(e.target.value)} className="w-full p-2 text-xs border border-sky-200 rounded-lg mb-2 focus:ring-2 focus:ring-sky-400 outline-none" placeholder="Cabang Baru..." />
-                                        <div className="flex gap-2">
-                                            <button onClick={() => setIsAddingStore(false)} className="flex-1 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded-lg">Batal</button>
-                                            <button onClick={handleAddNewStore} disabled={!newStoreName} className="flex-1 py-1.5 bg-sky-600 text-white text-[10px] font-bold rounded-lg shadow-sm disabled:opacity-50">Simpan</button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">
-                                    {profiles.map(p => (
-                                        <button 
-                                            key={p.id} 
-                                            onClick={() => setSelectedProfileId(p.id)}
-                                            className={`w-full text-left p-3 rounded-xl border transition-all relative group ${selectedProfileId === p.id ? 'bg-slate-800 text-white border-slate-800 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
-                                        >
-                                            <div className="font-bold text-sm truncate pr-6">{p.name}</div>
-                                            <div className={`text-[10px] truncate ${selectedProfileId === p.id ? 'text-slate-400' : 'text-slate-400'}`}>{p.address || 'Belum ada alamat'}</div>
-                                            {selectedProfileId === p.id && <div className="absolute top-1/2 -translate-y-1/2 right-3 w-2 h-2 rounded-full bg-brand-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]"></div>}
-                                        </button>
-                                    ))}
-                                </div>
-                                
-                                <div className="pt-4 border-t border-slate-100 mt-4">
-                                     <h3 className="font-bold text-slate-700 text-xs mb-2">Global Settings</h3>
-                                     <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
-                                        <span className="text-xs font-bold text-slate-500">Low Stock Limit</span>
-                                        <input type="number" value={localSettings.lowStockThreshold} onChange={(e) => setLocalSettings({ ...localSettings, lowStockThreshold: parseInt(e.target.value) || 0 })} className="w-16 p-1 text-center text-xs font-bold border border-slate-300 rounded focus:border-sky-500 outline-none" />
-                                     </div>
-                                </div>
-
-                                <div className="pt-4 border-t border-slate-100">
-                                    <button onClick={() => setShowResetModal(true)} className="w-full py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-2"><Icon name="trash" /> Reset Database</button>
-                                </div>
+                                <div className="flex justify-between items-center mb-2"><h3 className="font-bold text-slate-700 text-sm">Daftar Toko</h3><button onClick={() => setIsAddingStore(true)} className="text-[10px] bg-sky-50 text-sky-600 px-2 py-1 rounded-lg font-bold border border-sky-100 hover:bg-sky-100">+ Tambah</button></div>
+                                {isAddingStore && (<div className="p-3 bg-sky-50 rounded-xl border border-sky-200 mb-2 animate-slide-up"><label className="text-[10px] font-bold text-sky-700 block mb-1">Nama Toko Baru</label><input autoFocus type="text" value={newStoreName} onChange={e => setNewStoreName(e.target.value)} className="w-full p-2 text-xs border border-sky-200 rounded-lg mb-2 focus:ring-2 focus:ring-sky-400 outline-none" placeholder="Cabang Baru..." /><div className="flex gap-2"><button onClick={() => setIsAddingStore(false)} className="flex-1 py-1.5 bg-white border border-slate-200 text-slate-500 text-[10px] font-bold rounded-lg">Batal</button><button onClick={handleAddNewStore} disabled={!newStoreName} className="flex-1 py-1.5 bg-sky-600 text-white text-[10px] font-bold rounded-lg shadow-sm disabled:opacity-50">Simpan</button></div></div>)}
+                                <div className="space-y-2 max-h-[400px] overflow-y-auto custom-scrollbar pr-1">{profiles.map(p => (<button key={p.id} onClick={() => setSelectedProfileId(p.id)} className={`w-full text-left p-3 rounded-xl border transition-all relative group ${selectedProfileId === p.id ? 'bg-slate-800 text-white border-slate-800 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}><div className="font-bold text-sm truncate pr-6">{p.name}</div><div className={`text-[10px] truncate ${selectedProfileId === p.id ? 'text-slate-400' : 'text-slate-400'}`}>{p.address || 'Belum ada alamat'}</div>{selectedProfileId === p.id && <div className="absolute top-1/2 -translate-y-1/2 right-3 w-2 h-2 rounded-full bg-brand-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]"></div>}</button>))}</div>
+                                <div className="pt-4 border-t border-slate-100 mt-4"><h3 className="font-bold text-slate-700 text-xs mb-2">Global Settings</h3><div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200"><span className="text-xs font-bold text-slate-500">Low Stock Limit</span><input type="number" value={localSettings.lowStockThreshold} onChange={(e) => setLocalSettings({ ...localSettings, lowStockThreshold: parseInt(e.target.value) || 0 })} className="w-16 p-1 text-center text-xs font-bold border border-slate-300 rounded focus:border-sky-500 outline-none" /></div></div>
+                                <div className="pt-4 border-t border-slate-100"><button onClick={() => setShowResetModal(true)} className="w-full py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-xs font-bold hover:bg-red-100 flex items-center justify-center gap-2"><Icon name="trash" /> Reset Database</button></div>
                             </div>
-
-                            {/* Right Content: Edit Selected Profile */}
                             <div className="md:col-span-2">
-                                {activeProfile ? (
-                                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 h-full relative">
-                                        <div className="flex justify-between items-start mb-4">
-                                            <h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="store" className="text-sky-600" /> Edit Profil: {activeProfile.name}</h3>
-                                            {profiles.length > 1 && (
-                                                <button onClick={() => removeProfile(activeProfile.id)} className="text-[10px] text-red-500 font-bold hover:underline flex items-center gap-1"><Icon name="trash" /> Hapus Toko Ini</button>
-                                            )}
-                                        </div>
-
-                                        <div className="space-y-4">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nama Toko (Judul Struk)</label>
-                                                    <input type="text" value={activeProfile.name} onChange={(e) => updateProfile(activeProfile.id, 'name', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm font-bold" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Alamat / Sub-judul</label>
-                                                    <input type="text" value={activeProfile.address} onChange={(e) => updateProfile(activeProfile.id, 'address', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" />
-                                                </div>
-                                            </div>
-
-                                            <div className="bg-white p-3 rounded-xl border border-slate-200">
-                                                <div className="flex justify-between items-center mb-2">
-                                                    <label className="text-[10px] font-bold text-slate-500 uppercase">Header Tambahan (Opsional)</label>
-                                                    <button onClick={() => addHeader(activeProfile.id)} className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded border border-sky-100 hover:bg-sky-100">+ Baris</button>
-                                                </div>
-                                                <div className="space-y-2">
-                                                    {(!activeProfile.additionalHeaders || activeProfile.additionalHeaders.length === 0) && <p className="text-[10px] text-slate-400 italic">Tidak ada header tambahan (No. Telp, IG, dll).</p>}
-                                                    {(activeProfile.additionalHeaders || []).map((h, idx) => (
-                                                        <div key={idx} className="flex gap-2">
-                                                            <input type="text" value={h} onChange={(e) => handleHeaderChange(activeProfile.id, idx, e.target.value)} className="flex-1 p-2 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-xs" placeholder={`Info Tambahan ${idx + 1}`} />
-                                                            <button onClick={() => removeHeader(activeProfile.id, idx)} className="w-8 bg-red-50 text-red-500 rounded-lg border border-red-100 hover:bg-red-100 flex items-center justify-center"><Icon name="xmark" /></button>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-
-                                            <div>
-                                                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Footer Struk (Pesan Bawah)</label>
-                                                <textarea value={activeProfile.footer || ''} onChange={(e) => updateProfile(activeProfile.id, 'footer', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm h-20 resize-none font-mono text-xs" placeholder="Terima Kasih..."></textarea>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="h-full flex items-center justify-center text-slate-400 text-sm italic border border-dashed border-slate-300 rounded-2xl bg-slate-50">Pilih toko di sebelah kiri untuk mengedit.</div>
-                                )}
+                                {activeProfile ? (<div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 h-full relative"><div className="flex justify-between items-start mb-4"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="store" className="text-sky-600" /> Edit Profil: {activeProfile.name}</h3>{profiles.length > 1 && (<button onClick={() => removeProfile(activeProfile.id)} className="text-[10px] text-red-500 font-bold hover:underline flex items-center gap-1"><Icon name="trash" /> Hapus Toko Ini</button>)}</div><div className="space-y-4"><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Nama Toko (Judul Struk)</label><input type="text" value={activeProfile.name} onChange={(e) => updateProfile(activeProfile.id, 'name', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm font-bold" /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Alamat / Sub-judul</label><input type="text" value={activeProfile.address} onChange={(e) => updateProfile(activeProfile.id, 'address', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm" /></div></div><div className="bg-white p-3 rounded-xl border border-slate-200"><div className="flex justify-between items-center mb-2"><label className="text-[10px] font-bold text-slate-500 uppercase">Header Tambahan (Opsional)</label><button onClick={() => addHeader(activeProfile.id)} className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded border border-sky-100 hover:bg-sky-100">+ Baris</button></div><div className="space-y-2">{(!activeProfile.additionalHeaders || activeProfile.additionalHeaders.length === 0) && <p className="text-[10px] text-slate-400 italic">Tidak ada header tambahan (No. Telp, IG, dll).</p>}{(activeProfile.additionalHeaders || []).map((h, idx) => (<div key={idx} className="flex gap-2"><input type="text" value={h} onChange={(e) => handleHeaderChange(activeProfile.id, idx, e.target.value)} className="flex-1 p-2 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-xs" placeholder={`Info Tambahan ${idx + 1}`} /><button onClick={() => removeHeader(activeProfile.id, idx)} className="w-8 bg-red-50 text-red-500 rounded-lg border border-red-100 hover:bg-red-100 flex items-center justify-center"><Icon name="xmark" /></button></div>))}</div></div><div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Footer Struk (Pesan Bawah)</label><textarea value={activeProfile.footer || ''} onChange={(e) => updateProfile(activeProfile.id, 'footer', e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-sky-500 outline-none text-sm h-20 resize-none font-mono text-xs" placeholder="Terima Kasih..."></textarea></div></div></div>) : (<div className="h-full flex items-center justify-center text-slate-400 text-sm italic border border-dashed border-slate-300 rounded-2xl bg-slate-50">Pilih toko di sebelah kiri untuk mengedit.</div>)}
                             </div>
                         </div>
-
-                        <div className="mt-6 pt-6 border-t border-slate-100">
-                             <button onClick={handleSave} disabled={loading} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-slate-900">{loading ? <div className="typing-dot bg-white"></div> : <Icon name="floppy-disk" />} Simpan Semua Pengaturan</button>
-                        </div>
+                        <div className="mt-6 pt-6 border-t border-slate-100"><button onClick={handleSave} disabled={loading} className="w-full py-4 bg-slate-800 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 hover:bg-slate-900">{loading ? <div className="typing-dot bg-white"></div> : <Icon name="floppy-disk" />} Simpan Semua Pengaturan</button></div>
                     </div>
-
-                    {/* Modal Reset DB */}
-                    {showResetModal && (
-                        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-red-900/80 backdrop-blur-sm fade-in">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 transform transition-all scale-100 border-2 border-red-500">
-                                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600 text-3xl"><Icon name="skull" /></div>
-                                <h3 className="text-xl font-black text-center text-red-700 mb-2 uppercase tracking-tight">Hapus Total Database?</h3>
-                                <p className="text-center text-sm text-slate-600 mb-4">Semua stok dan transaksi akan dihapus.</p>
-                                <div className="bg-red-50 p-3 rounded-lg border border-red-200 mb-4">
-                                    <label className="text-[10px] font-bold text-red-500 uppercase block mb-1">Ketik "RESET"</label>
-                                    <input autoFocus type="text" className="w-full p-2 text-center font-black tracking-widest border-2 border-red-300 rounded focus:border-red-600 outline-none uppercase" placeholder="RESET" value={resetInput} onChange={e => setResetInput(e.target.value.toUpperCase())} />
-                                </div>
-                                <div className="flex gap-3">
-                                    <button onClick={() => { setShowResetModal(false); setResetInput(""); }} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold text-sm hover:bg-slate-50">Batal</button>
-                                    <button onClick={handleResetDatabase} disabled={isResetting || resetInput !== 'RESET'} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold text-sm shadow-lg hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">{isResetting ? <div className="typing-dot bg-white"></div> : 'HAPUS'}</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {showResetModal && (<div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-red-900/80 backdrop-blur-sm fade-in"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 transform transition-all scale-100 border-2 border-red-500"><div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 text-red-600 text-3xl"><Icon name="skull" /></div><h3 className="text-xl font-black text-center text-red-700 mb-2 uppercase tracking-tight">Hapus Total Database?</h3><p className="text-center text-sm text-slate-600 mb-4">Semua stok dan transaksi akan dihapus.</p><div className="bg-red-50 p-3 rounded-lg border border-red-200 mb-4"><label className="text-[10px] font-bold text-red-500 uppercase block mb-1">Ketik "RESET"</label><input autoFocus type="text" className="w-full p-2 text-center font-black tracking-widest border-2 border-red-300 rounded focus:border-red-600 outline-none uppercase" placeholder="RESET" value={resetInput} onChange={e => setResetInput(e.target.value.toUpperCase())} /></div><div className="flex gap-3"><button onClick={() => { setShowResetModal(false); setResetInput(""); }} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold text-sm hover:bg-slate-50">Batal</button><button onClick={handleResetDatabase} disabled={isResetting || resetInput !== 'RESET'} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold text-sm shadow-lg hover:bg-red-700 disabled:opacity-50 flex justify-center items-center gap-2">{isResetting ? <div className="typing-dot bg-white"></div> : 'HAPUS'}</button></div></div></div>)}
                  </div>
             );
         };
 
-        // --- PURCHASE VIEW (UNCHANGED) ---
         const PurchaseView = ({ user, showToast }) => {
             const [purchases, setPurchases] = useState([]);
             const [suppliers, setSuppliers] = useState([]);
@@ -663,58 +618,16 @@
             const [supplierData, setSupplierData] = useState({ name: '', address: '', phone: '' });
             const [editingSupplier, setEditingSupplier] = useState(null);
 
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases'), window.orderBy('date', 'desc'), window.limit(200));
-                const unsub = window.onSnapshot(q, (snapshot) => { setPurchases(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false); });
-                return () => unsub();
-            }, [user]);
-
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers'), window.orderBy('name', 'asc'));
-                const unsub = window.onSnapshot(q, (snapshot) => { setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); });
-                return () => unsub();
-            }, [user]);
-
+            useEffect(() => { if (!user) return; const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases'), window.orderBy('date', 'desc'), window.limit(200)); const unsub = window.onSnapshot(q, (snapshot) => { setPurchases(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); setLoading(false); }); return () => unsub(); }, [user]);
+            useEffect(() => { if (!user) return; const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers'), window.orderBy('name', 'asc')); const unsub = window.onSnapshot(q, (snapshot) => { setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))); }); return () => unsub(); }, [user]);
             useEffect(() => { if (invoiceData.paymentMethod === 'Kredit') { setInvoiceData(prev => ({ ...prev, isPaid: false })); } else { setInvoiceData(prev => ({ ...prev, isPaid: true })); } }, [invoiceData.paymentMethod]);
 
-            const stats = useMemo(() => {
-                const today = new Date(); today.setHours(0,0,0,0);
-                const next7Days = new Date(today); next7Days.setDate(today.getDate() + 7);
-                let totalPurchase = 0, dueSoon = 0, overdue = 0, unpaid = 0, countTotal = 0, countDue = 0, countOverdue = 0, countUnpaid = 0, consignmentTotal = 0, consignmentUnpaid = 0;
-                purchases.forEach(p => {
-                    const amount = safeNumber(p.total); const dueDate = p.dueDate ? new Date(p.dueDate) : null; if(dueDate) dueDate.setHours(0,0,0,0);
-                    if (p.isConsignment) { consignmentTotal += amount; if (!p.isPaid) { consignmentUnpaid += amount; } }
-                    totalPurchase += amount; countTotal++;
-                    if (!p.isPaid) { unpaid += amount; countUnpaid++; if (dueDate) { if (dueDate < today) { overdue += amount; countOverdue++; } else if (dueDate <= next7Days) { dueSoon += amount; countDue++; } } }
-                });
-                return { totalPurchase, dueSoon, overdue, unpaid, countTotal, countDue, countOverdue, countUnpaid, consignmentTotal, consignmentUnpaid };
-            }, [purchases]);
-
+            const stats = useMemo(() => { const today = new Date(); today.setHours(0,0,0,0); const next7Days = new Date(today); next7Days.setDate(today.getDate() + 7); let totalPurchase = 0, dueSoon = 0, overdue = 0, unpaid = 0, countTotal = 0, countDue = 0, countOverdue = 0, countUnpaid = 0, consignmentTotal = 0, consignmentUnpaid = 0; purchases.forEach(p => { const amount = safeNumber(p.total); const dueDate = p.dueDate ? new Date(p.dueDate) : null; if(dueDate) dueDate.setHours(0,0,0,0); if (p.isConsignment) { consignmentTotal += amount; if (!p.isPaid) { consignmentUnpaid += amount; } } totalPurchase += amount; countTotal++; if (!p.isPaid) { unpaid += amount; countUnpaid++; if (dueDate) { if (dueDate < today) { overdue += amount; countOverdue++; } else if (dueDate <= next7Days) { dueSoon += amount; countDue++; } } } }); return { totalPurchase, dueSoon, overdue, unpaid, countTotal, countDue, countOverdue, countUnpaid, consignmentTotal, consignmentUnpaid }; }, [purchases]);
             const handleSelectSupplier = (supplier) => { setInvoiceData({ ...invoiceData, supplier: supplier.name }); setSupplierModalOpen(false); setInvoiceModalOpen(true); };
-
-            const handleSubmitInvoice = async (e) => {
-                e.preventDefault(); if(!invoiceData.supplier || !invoiceData.total) return; setSubmitting(true);
-                const subtotal = safeNumber(invoiceData.total); const ppn = safeNumber(invoiceData.ppn); const grandTotal = subtotal + ppn;
-                try {
-                    await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases'), { supplier: invoiceData.supplier, total: grandTotal, subtotal: subtotal, ppn: ppn, paymentMethod: invoiceData.paymentMethod, date: invoiceData.date ? new Date(invoiceData.date).toISOString() : new Date().toISOString(), dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate).toISOString() : null, isPaid: invoiceData.isPaid, isConsignment: invoiceData.isConsignment || false, createdAt: window.serverTimestamp() });
-                    showToast("Faktur berhasil dicatat"); setInvoiceModalOpen(false); setInvoiceData({ supplier: '', date: '', dueDate: '', total: '', ppn: '', paymentMethod: 'Tunai', isPaid: true, isConsignment: false });
-                } catch(err) { console.error(err); showToast("Gagal menyimpan faktur", "error"); } finally { setSubmitting(false); }
-            };
-
+            const handleSubmitInvoice = async (e) => { e.preventDefault(); if(!invoiceData.supplier || !invoiceData.total) return; setSubmitting(true); const subtotal = safeNumber(invoiceData.total); const ppn = safeNumber(invoiceData.ppn); const grandTotal = subtotal + ppn; try { await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases'), { supplier: invoiceData.supplier, total: grandTotal, subtotal: subtotal, ppn: ppn, paymentMethod: invoiceData.paymentMethod, date: invoiceData.date ? new Date(invoiceData.date).toISOString() : new Date().toISOString(), dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate).toISOString() : null, isPaid: invoiceData.isPaid, isConsignment: invoiceData.isConsignment || false, createdAt: window.serverTimestamp() }); showToast("Faktur berhasil dicatat"); setInvoiceModalOpen(false); setInvoiceData({ supplier: '', date: '', dueDate: '', total: '', ppn: '', paymentMethod: 'Tunai', isPaid: true, isConsignment: false }); } catch(err) { console.error(err); showToast("Gagal menyimpan faktur", "error"); } finally { setSubmitting(false); } };
             const deletePurchase = async (id) => { if(!confirm("Hapus faktur ini?")) return; try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases', id)); showToast("Faktur dihapus"); } catch(err) { showToast("Gagal hapus", "error"); } };
             const togglePaid = async (purchase) => { try { await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'purchases', purchase.id), { isPaid: !purchase.isPaid }); showToast("Status pembayaran diperbarui"); } catch(err) { showToast("Gagal update status", "error"); } };
-            
-            const handleSaveSupplier = async (e) => {
-                e.preventDefault(); if(!supplierData.name) return; setSubmitting(true);
-                try {
-                    const collectionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers');
-                    if(editingSupplier) { await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers', editingSupplier.id), supplierData); showToast("Supplier diupdate"); } else { await window.addDoc(collectionRef, { ...supplierData, createdAt: window.serverTimestamp() }); showToast("Supplier ditambahkan"); }
-                    setAddSupplierMode(false); setEditingSupplier(null); setSupplierData({ name: '', address: '', phone: '' });
-                } catch(err) { console.error(err); showToast("Gagal simpan supplier", "error"); } finally { setSubmitting(false); }
-            };
-
+            const handleSaveSupplier = async (e) => { e.preventDefault(); if(!supplierData.name) return; setSubmitting(true); try { const collectionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers'); if(editingSupplier) { await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'suppliers', editingSupplier.id), supplierData); showToast("Supplier diupdate"); } else { await window.addDoc(collectionRef, { ...supplierData, createdAt: window.serverTimestamp() }); showToast("Supplier ditambahkan"); } setAddSupplierMode(false); setEditingSupplier(null); setSupplierData({ name: '', address: '', phone: '' }); } catch(err) { console.error(err); showToast("Gagal simpan supplier", "error"); } finally { setSubmitting(false); } };
             const handleEditSupplier = (supplier) => { setEditingSupplier(supplier); setSupplierData({ name: supplier.name, address: supplier.address || '', phone: supplier.phone || '' }); setAddSupplierMode(true); };
             const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase()));
 
@@ -738,21 +651,40 @@
                             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm h-[80vh] flex flex-col relative overflow-hidden">
                                 <div className="flex items-center justify-between p-4 border-b border-slate-100 bg-white z-10">{addSupplierMode ? (<button onClick={() => { setAddSupplierMode(false); setEditingSupplier(null); setSupplierData({name:'', address:'', phone:''}); }} className="flex items-center gap-1 text-slate-500 text-sm font-bold"><Icon name="chevron-left" /> Kembali</button>) : (<button onClick={() => setSupplierModalOpen(false)} className="text-slate-400 hover:text-slate-600"><Icon name="xmark" /></button>)}<h3 className="text-lg font-bold text-slate-800">{addSupplierMode ? (editingSupplier ? 'Edit Supplier' : 'Tambah Supplier') : 'Pilih Supplier'}</h3><div className="w-6"></div></div>
                                 {!addSupplierMode ? (<><div className="p-4 bg-white border-b border-slate-100 flex gap-2"><div className="relative flex-1"><input autoFocus type="text" className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500" placeholder="Cari..." value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" /></div><button onClick={() => setAddSupplierMode(true)} className="px-3 py-2 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 font-bold text-xs flex items-center gap-1 whitespace-nowrap active:scale-95 transition-all"><Icon name="plus" /> Pengirim</button></div><div className="px-4 py-2 bg-slate-50 text-[10px] font-bold text-slate-500">{filteredSuppliers.length} ditemukan</div><div className="flex-1 overflow-y-auto custom-scrollbar">{filteredSuppliers.length === 0 ? (<div className="flex flex-col items-center justify-center py-10 opacity-60"><Icon name="box-open" className="text-3xl text-slate-300 mb-2" /><p className="text-xs text-slate-400">Belum ada supplier.</p><button onClick={() => setAddSupplierMode(true)} className="mt-2 text-teal-600 text-xs font-bold hover:underline">Tambah Baru</button></div>) : (<div className="divide-y divide-slate-100">{filteredSuppliers.map(s => (<div key={s.id} className="p-4 bg-white hover:bg-slate-50 transition-colors flex items-center justify-between"><div className="flex-1 min-w-0 pr-3"><h4 className="font-bold text-slate-800 text-sm truncate">{s.name}</h4><p className="text-[10px] text-slate-500 truncate">{s.address || 'Tidak ada alamat'}</p></div><div className="flex gap-2"><button onClick={() => handleEditSupplier(s)} className="text-teal-600 text-xs font-bold px-2 py-1 hover:bg-teal-50 rounded">Edit</button><button onClick={() => handleSelectSupplier(s)} className="bg-white border border-teal-600 text-teal-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-teal-50 shadow-sm">Pilih</button></div></div>))}</div>)}</div></>) : (<div className="p-6 flex-1 overflow-y-auto"><form onSubmit={handleSaveSupplier} className="space-y-4"><div><label className="text-[10px] font-bold text-slate-500 uppercase">Nama Supplier / Pengirim</label><input autoFocus type="text" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" placeholder="Contoh: PT. Maju Jaya" value={supplierData.name} onChange={e => setSupplierData({...supplierData, name: e.target.value})} required /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">Alamat (Kota/Kab)</label><input type="text" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-medium outline-none focus:border-teal-500" placeholder="Contoh: Kota Cirebon, Jawa Barat" value={supplierData.address} onChange={e => setSupplierData({...supplierData, address: e.target.value})} /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">No. Telepon (Opsional)</label><input type="tel" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-medium outline-none focus:border-teal-500" placeholder="08..." value={supplierData.phone} onChange={e => setSupplierData({...supplierData, phone: e.target.value})} /></div><button type="submit" disabled={submitting} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-bold shadow-lg shadow-teal-100 flex items-center justify-center gap-2 mt-4 active:scale-95 transition-all">{submitting ? <div className="typing-dot bg-white"></div> : <><Icon name="save" /> {editingSupplier ? 'UPDATE DATA' : 'SIMPAN SUPPLIER'}</>}</button></form></div>)}</div></div>)}
-
-                    {invoiceModalOpen && (
-                        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in">
-                             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 relative">
-                                <button onClick={() => setInvoiceModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="xmark" /></button><h3 className="text-lg font-bold text-slate-800 mb-4">Detail Faktur</h3>
-                                <div className="bg-teal-50 p-3 rounded-xl border border-teal-100 mb-4 flex items-center gap-2"><div className="w-8 h-8 bg-teal-100 text-teal-600 rounded-lg flex items-center justify-center"><Icon name="truck-fast" /></div><div><p className="text-[10px] text-teal-600 font-bold uppercase">Pengirim</p><p className="text-sm font-bold text-teal-800">{invoiceData.supplier}</p></div></div>
-                                <form onSubmit={handleSubmitInvoice} className="space-y-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">Subtotal (Tanpa PPN)</label><input autoFocus type="number" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" placeholder="0" value={invoiceData.total} onChange={e => setInvoiceData({...invoiceData, total: e.target.value})} required /></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">PPN (Rp)</label><input type="number" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" placeholder="0" value={invoiceData.ppn} onChange={e => setInvoiceData({...invoiceData, ppn: e.target.value})} /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">Pembayaran</label><select className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" value={invoiceData.paymentMethod} onChange={e => setInvoiceData({...invoiceData, paymentMethod: e.target.value})}><option value="Tunai">Tunai</option><option value="Kredit">Kredit (Tempo)</option><option value="Transfer">Transfer</option></select></div></div><div className="p-3 bg-slate-100 rounded-xl flex justify-between items-center border border-slate-200"><span className="text-xs font-bold text-slate-500">Total Akhir:</span><span className="text-lg font-black text-slate-800">{formatRupiah(safeNumber(invoiceData.total) + safeNumber(invoiceData.ppn))}</span></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">Tgl Faktur</label><input type="date" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none" value={invoiceData.date} onChange={e => setInvoiceData({...invoiceData, date: e.target.value})} required /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">Jatuh Tempo</label><input type="date" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none" value={invoiceData.dueDate} onChange={e => setInvoiceData({...invoiceData, dueDate: e.target.value})} /></div></div><div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex items-center gap-2 py-1"><input type="checkbox" id="consignmentCheckInv" checked={invoiceData.isConsignment} onChange={e => setInvoiceData({...invoiceData, isConsignment: e.target.checked})} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" /><label htmlFor="consignmentCheckInv" className="text-sm font-bold text-slate-700">Barang Konsinyasi (Titipan)?</label></div><div className="flex items-center gap-2 py-1 border-t border-dashed border-slate-200 mt-1 pt-1"><input type="checkbox" id="paidCheckInv" checked={invoiceData.isPaid} onChange={e => setInvoiceData({...invoiceData, isPaid: e.target.checked})} className="w-4 h-4 rounded text-teal-600 focus:ring-teal-500" /><label htmlFor="paidCheckInv" className="text-sm font-bold text-slate-700">Sudah Lunas?</label></div></div><button type="submit" disabled={submitting} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-bold shadow-lg shadow-teal-100 flex items-center justify-center gap-2 mt-2 active:scale-95 transition-all">{submitting ? <div className="typing-dot bg-white"></div> : <><Icon name="save" /> SIMPAN FAKTUR</>}</button></form>
-                            </div>
-                        </div>
-                    )}
+                    {invoiceModalOpen && (<div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 relative"><button onClick={() => setInvoiceModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="xmark" /></button><h3 className="text-lg font-bold text-slate-800 mb-4">Detail Faktur</h3><div className="bg-teal-50 p-3 rounded-xl border border-teal-100 mb-4 flex items-center gap-2"><div className="w-8 h-8 bg-teal-100 text-teal-600 rounded-lg flex items-center justify-center"><Icon name="truck-fast" /></div><div><p className="text-[10px] text-teal-600 font-bold uppercase">Pengirim</p><p className="text-sm font-bold text-teal-800">{invoiceData.supplier}</p></div></div><form onSubmit={handleSubmitInvoice} className="space-y-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">Subtotal (Tanpa PPN)</label><input autoFocus type="number" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" placeholder="0" value={invoiceData.total} onChange={e => setInvoiceData({...invoiceData, total: e.target.value})} required /></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">PPN (Rp)</label><input type="number" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" placeholder="0" value={invoiceData.ppn} onChange={e => setInvoiceData({...invoiceData, ppn: e.target.value})} /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">Pembayaran</label><select className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:border-teal-500" value={invoiceData.paymentMethod} onChange={e => setInvoiceData({...invoiceData, paymentMethod: e.target.value})}><option value="Tunai">Tunai</option><option value="Kredit">Kredit (Tempo)</option><option value="Transfer">Transfer</option></select></div></div><div className="p-3 bg-slate-100 rounded-xl flex justify-between items-center border border-slate-200"><span className="text-xs font-bold text-slate-500">Total Akhir:</span><span className="text-lg font-black text-slate-800">{formatRupiah(safeNumber(invoiceData.total) + safeNumber(invoiceData.ppn))}</span></div><div className="grid grid-cols-2 gap-3"><div><label className="text-[10px] font-bold text-slate-500 uppercase">Tgl Faktur</label><input type="date" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none" value={invoiceData.date} onChange={e => setInvoiceData({...invoiceData, date: e.target.value})} required /></div><div><label className="text-[10px] font-bold text-slate-500 uppercase">Jatuh Tempo</label><input type="date" className="w-full p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none" value={invoiceData.dueDate} onChange={e => setInvoiceData({...invoiceData, dueDate: e.target.value})} /></div></div><div className="bg-slate-50 p-3 rounded-xl border border-slate-100"><div className="flex items-center gap-2 py-1"><input type="checkbox" id="consignmentCheckInv" checked={invoiceData.isConsignment} onChange={e => setInvoiceData({...invoiceData, isConsignment: e.target.checked})} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" /><label htmlFor="consignmentCheckInv" className="text-sm font-bold text-slate-700">Barang Konsinyasi (Titipan)?</label></div><div className="flex items-center gap-2 py-1 border-t border-dashed border-slate-200 mt-1 pt-1"><input type="checkbox" id="paidCheckInv" checked={invoiceData.isPaid} onChange={e => setInvoiceData({...invoiceData, isPaid: e.target.checked})} className="w-4 h-4 rounded text-teal-600 focus:ring-teal-500" /><label htmlFor="paidCheckInv" className="text-sm font-bold text-slate-700">Sudah Lunas?</label></div></div><button type="submit" disabled={submitting} className="w-full py-3.5 bg-teal-600 text-white rounded-xl font-bold shadow-lg shadow-teal-100 flex items-center justify-center gap-2 mt-2 active:scale-95 transition-all">{submitting ? <div className="typing-dot bg-white"></div> : <><Icon name="save" /> SIMPAN FAKTUR</>}</button></form></div></div>)}
                 </div>
             );
         };
 
-        // --- CASHIER COMPONENT (UPDATED PRINT LOGIC) ---
+        const TransferView = ({ items, settings, showToast, currentProfile, user }) => {
+            const [sourceStoreId, setSourceStoreId] = useState(currentProfile.id !== 'all_stores' ? currentProfile.id : 'default');
+            const [destStoreId, setDestStoreId] = useState('');
+            const [cart, setCart] = useState([]);
+            const [search, setSearch] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+            const storeProfiles = settings.storeProfiles || [];
+            const fuse = useMemo(() => new Fuse(items, { keys: ['name'], threshold: 0.3 }), [items]);
+            const filteredItems = useMemo(() => { if (!search) return []; return fuse.search(search).map(r => r.item).slice(0, 30); }, [items, search, fuse]);
+            const getStockInSource = (item) => { if (!item.stocks) return item.qty || 0; return item.stocks[sourceStoreId] || 0; };
+            const addToTransfer = (item) => { const currentStock = getStockInSource(item); if (currentStock <= 0) { showToast("Stok habis di toko asal!", "error"); return; } setCart(prev => { const existing = prev.find(c => c.id === item.id); if (existing) { if (existing.transferQty >= currentStock) { showToast("Melebihi stok tersedia!", "error"); return prev; } return prev.map(c => c.id === item.id ? { ...c, transferQty: c.transferQty + 1 } : c); } return [...prev, { ...item, transferQty: 1 }]; }); };
+            const updateQty = (id, delta) => { setCart(prev => prev.map(c => { if (c.id === id) { const newQty = c.transferQty + delta; const maxStock = getStockInSource(items.find(i => i.id === id)); if (newQty > maxStock) { showToast("Stok mentok!", "error"); return c; } if (newQty < 1) return c; return { ...c, transferQty: newQty }; } return c; })); };
+            const removeFromCart = (id) => setCart(prev => prev.filter(c => c.id !== id));
+            const handleTransfer = async () => { if (!sourceStoreId || !destStoreId) { showToast("Pilih toko asal dan tujuan", "error"); return; } if (sourceStoreId === destStoreId) { showToast("Toko asal dan tujuan tidak boleh sama", "error"); return; } if (cart.length === 0) return; setIsProcessing(true); try { const batch = window.writeBatch(window.db); cart.forEach(item => { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id); const sourceField = `stocks.${sourceStoreId}`; const destField = `stocks.${destStoreId}`; batch.update(docRef, { [sourceField]: window.increment(-item.transferQty), [destField]: window.increment(item.transferQty), updatedAt: window.serverTimestamp() }); }); await batch.commit(); 
+                // LOG
+                const sourceName = storeProfiles.find(p=>p.id===sourceStoreId)?.name;
+                const destName = storeProfiles.find(p=>p.id===destStoreId)?.name;
+                logToDB('TRANSFER', `Transfer ${cart.length} jenis item dari ${sourceName} ke ${destName}`, sourceStoreId, user?.email);
+
+                showToast("Transfer Stok Berhasil!", "success"); setCart([]); setSearch(''); } catch (error) { console.error("Transfer error:", error); showToast("Gagal melakukan transfer", "error"); } finally { setIsProcessing(false); } };
+            const copyToWA = () => { if (cart.length === 0) return; const sourceName = storeProfiles.find(p => p.id === sourceStoreId)?.name || 'Toko Asal'; const destName = storeProfiles.find(p => p.id === destStoreId)?.name || 'Toko Tujuan'; let text = `*Barang untuk ${destName}*\nDari: ${sourceName}\nTanggal: ${new Date().toLocaleDateString('id-ID')}\n----------------------\n\n`; cart.forEach((item, idx) => { text += `${idx + 1}. ${item.name} (${item.transferQty} ${item.unit || 'Pcs'})\n`; }); text += `\nTotal Item: ${cart.length} Jenis`; if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => showToast("Disalin ke Clipboard! Tempel di WA.")).catch(() => fallbackCopy(text)); } else { fallbackCopy(text); } };
+            const fallbackCopy = (text) => { const textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; textArea.style.left = "-9999px"; document.body.appendChild(textArea); textArea.select(); try { const successful = document.execCommand('copy'); if(successful) showToast("Disalin! Tempel di WA."); else showToast("Gagal menyalin otomatis", "error"); } catch (err) { showToast("Browser tidak support copy", "error"); } document.body.removeChild(textArea); };
+
+            return (
+                <div className="fade-in pb-24 md:pb-0 h-full flex flex-col md:flex-row gap-4 relative z-10">
+                    <div className="flex-1 flex flex-col h-full min-h-0"><header className="mb-4"><h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">Transfer Antar Cabang</h2><p className="text-slate-500 text-xs mt-1">Pindahkan stok fisik dari satu toko ke toko lain</p></header><div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-4 grid grid-cols-[1fr,auto,1fr] gap-2 items-center"><div><label className="text-[10px] font-bold text-slate-400 uppercase">Dari (Sumber)</label><select value={sourceStoreId} onChange={e => { setSourceStoreId(e.target.value); setCart([]); }} className="w-full p-2 rounded-lg bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:ring-2 focus:ring-sky-500">{storeProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div><div className="text-slate-300 pt-4"><Icon name="arrow-right-arrow-left" /></div><div><label className="text-[10px] font-bold text-slate-400 uppercase">Ke (Tujuan)</label><select value={destStoreId} onChange={e => setDestStoreId(e.target.value)} className="w-full p-2 rounded-lg bg-slate-50 border border-slate-200 text-sm font-bold outline-none focus:ring-2 focus:ring-sky-500"><option value="">-- Pilih Tujuan --</option>{storeProfiles.filter(p => p.id !== sourceStoreId).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div></div><div className="relative group mb-4"><input autoFocus type="text" placeholder="Cari barang untuk dipindah..." className="w-full pl-11 pr-4 py-3 rounded-2xl bg-white border border-slate-200 shadow-soft focus:ring-2 focus:ring-sky-500 outline-none transition-all font-bold text-slate-700" value={search} onChange={e => setSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg group-focus-within:text-sky-500" /></div><div className="flex-1 overflow-y-auto custom-scrollbar pr-1 pb-2">{search === '' ? (<div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60"><Icon name="box-open" className="text-5xl mb-3 text-slate-300" /><p className="font-semibold text-sm">Cari barang di toko sumber</p></div>) : (<div className="grid grid-cols-1 md:grid-cols-2 gap-3">{filteredItems.map(item => { const stock = getStockInSource(item); const inCart = cart.find(c => c.id === item.id); const remaining = stock - (inCart ? inCart.transferQty : 0); const isOOS = remaining <= 0; return (<button key={item.id} onClick={() => addToTransfer(item)} disabled={isOOS} className={`text-left p-3 rounded-xl border transition-all relative overflow-hidden group flex justify-between items-center ${isOOS ? 'bg-slate-50 opacity-60 cursor-not-allowed' : 'bg-white hover:border-sky-300 hover:shadow-md'}`}><div className="min-w-0 pr-2"><h4 className="font-bold text-slate-800 text-sm truncate">{item.name}</h4><p className="text-[10px] text-slate-500">{item.unit}</p></div><div className={`text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap ${isOOS ? 'bg-red-100 text-red-600' : 'bg-sky-50 text-sky-600'}`}>Sisa: {remaining}</div></button>); })}</div>)}</div></div><div className="w-full md:w-80 flex flex-col bg-white rounded-3xl shadow-soft border border-slate-100 h-fit md:h-full max-h-[calc(100vh-100px)]"><div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-3xl flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="truck-ramp-box" className="text-amber-500" /> Daftar Pindah</h3><span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-full">{cart.length} Item</span></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar min-h-[200px]">{cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><p className="text-xs font-medium">Belum ada barang</p></div>) : (cart.map(item => (<div key={item.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex gap-3 group items-center"><div className="flex-1 min-w-0"><h4 className="text-xs font-bold text-slate-700 truncate">{item.name}</h4></div><div className="flex items-center gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5"><button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 flex items-center justify-center text-[9px] hover:bg-slate-100 rounded text-slate-500"><Icon name="minus" /></button><span className="text-xs font-bold w-6 text-center">{item.transferQty}</span><button onClick={() => updateQty(item.id, 1)} className="w-6 h-6 flex items-center justify-center text-[9px] hover:bg-slate-100 rounded text-slate-500"><Icon name="plus" /></button></div><button onClick={() => removeFromCart(item.id)} className="text-red-400 hover:text-red-600"><Icon name="xmark" /></button></div>)))}</div><div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-3xl space-y-3"><button onClick={copyToWA} disabled={cart.length === 0} className="w-full py-3 rounded-xl bg-[#25D366] hover:bg-[#128C7E] text-white font-bold shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50"><Icon name="whatsapp" type="brands" /> Salin Teks WA</button><button onClick={handleTransfer} disabled={cart.length === 0 || !destStoreId || isProcessing} className="w-full py-3.5 bg-slate-800 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:bg-slate-400">{isProcessing ? <div className="typing-dot bg-white"></div> : <><Icon name="paper-plane" /> PROSES TRANSFER</>}</button></div></div></div>
+            );
+        };
+
         const CashierView = ({ items, user, showToast, settings, onGenerateImage, currentProfile }) => {
             const [isSessionActive, setIsSessionActive] = useState(false);
             const [search, setSearch] = useState('');
@@ -774,14 +706,12 @@
                 );
                 const unsub = window.onSnapshot(q, (snapshot) => {
                     const allCarts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // FILTER: Hanya tampilkan pending carts milik toko ini
                     const filtered = allCarts.filter(c => c.storeId === currentProfile.id || c.storeProfile === currentProfile.name);
                     setPendingCarts(filtered);
                 });
                 return () => unsub();
             }, [user, currentProfile]);
 
-            // Prevent interaction if in All Stores Mode
             if (currentProfile.id === 'all_stores') {
                 return (
                     <div className="fade-in h-full flex flex-col items-center justify-center text-center p-6 relative z-10">
@@ -801,197 +731,59 @@
             const addToCart = (item) => {
                 const stock = safeNumber(item.qty);
                 if (stock <= 0) { showToast("Stok Habis di Toko Ini!", "error"); return; }
-                
                 setCart(prev => {
                     const existing = prev.find(c => c.id === item.id);
-                    if (existing) { 
-                        if (existing.cartQty >= stock) { showToast("Stok tidak cukup!", "error"); return prev; } 
-                        return prev.map(c => c.id === item.id ? { ...c, cartQty: c.cartQty + 1 } : c); 
-                    }
+                    if (existing) { if (existing.cartQty >= stock) { showToast("Stok tidak cukup!", "error"); return prev; } return prev.map(c => c.id === item.id ? { ...c, cartQty: c.cartQty + 1 } : c); }
                     return [...prev, { ...item, cartQty: 1 }];
                 });
             };
             const removeFromCart = (id) => setCart(prev => prev.filter(c => c.id !== id));
-            
-            const updateQty = (id, delta) => {
-                setCart(prev => prev.map(c => {
-                    if (c.id === id) { 
-                        const newQty = c.cartQty + delta; 
-                        const maxStock = safeNumber(c.qty);
-                        if (newQty > maxStock) { showToast("Stok mentok!", "error"); return c; } 
-                        if (newQty < 1) return c; 
-                        return { ...c, cartQty: newQty }; 
-                    }
-                    return c;
-                }));
-            };
+            const updateQty = (id, delta) => { setCart(prev => prev.map(c => { if (c.id === id) { const newQty = c.cartQty + delta; const maxStock = safeNumber(c.qty); if (newQty > maxStock) { showToast("Stok mentok!", "error"); return c; } if (newQty < 1) return c; return { ...c, cartQty: newQty }; } return c; })); };
             const grandTotal = cart.reduce((acc, item) => acc + (safeNumber(item.price) * item.cartQty), 0);
             const change = safeNumber(paymentAmount) - grandTotal;
-            const getPaymentSuggestions = useMemo(() => {
-                const suggestions = new Set(); suggestions.add(grandTotal); 
-                [1000, 2000, 5000, 10000, 20000, 50000, 100000].forEach(denom => { const nextVal = Math.ceil(grandTotal / denom) * denom; if (nextVal > grandTotal) suggestions.add(nextVal); });
-                [2000, 5000, 10000, 20000, 50000, 100000].forEach(bill => { if (bill > grandTotal) suggestions.add(bill); });
-                return Array.from(suggestions).sort((a,b) => a-b).slice(0, 6);
-            }, [grandTotal]);
+            const getPaymentSuggestions = useMemo(() => { const suggestions = new Set(); suggestions.add(grandTotal); [1000, 2000, 5000, 10000, 20000, 50000, 100000].forEach(denom => { const nextVal = Math.ceil(grandTotal / denom) * denom; if (nextVal > grandTotal) suggestions.add(nextVal); }); [2000, 5000, 10000, 20000, 50000, 100000].forEach(bill => { if (bill > grandTotal) suggestions.add(bill); }); return Array.from(suggestions).sort((a,b) => a-b).slice(0, 6); }, [grandTotal]);
 
-            const handleBack = async () => { 
-                if (cart.length > 0) { 
-                    try {
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'pending_carts'), {
-                            date: new Date().toISOString(),
-                            items: cart,
-                            total: grandTotal,
-                            cashierName: user.email || 'Kasir',
-                            device: navigator.userAgent,
-                            storeProfile: currentProfile.name, 
-                            storeId: currentProfile.id, // SAVE ID TO FILTER LATER
-                            createdAt: window.serverTimestamp()
-                        });
-                        showToast("Transaksi disimpan (Pending)", "success");
-                    } catch (error) {
-                        console.error(error);
-                        showToast("Gagal menyimpan transaksi tunda", "error");
-                    }
-                } 
-                setIsSessionActive(false); 
-                setSearch(''); 
-                setCart([]); 
-            };
-            
+            const handleBack = async () => { if (cart.length > 0) { try { await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'pending_carts'), { date: new Date().toISOString(), items: cart, total: grandTotal, cashierName: user.email || 'Kasir', device: navigator.userAgent, storeProfile: currentProfile.name, storeId: currentProfile.id, createdAt: window.serverTimestamp() }); showToast("Transaksi disimpan (Pending)", "success"); } catch (error) { console.error(error); showToast("Gagal menyimpan transaksi tunda", "error"); } } setIsSessionActive(false); setSearch(''); setCart([]); };
             const confirmCancel = () => { setCart([]); setPaymentAmount(''); setSearch(''); setCancelModal(false); showToast("Transaksi dibatalkan & keranjang dikosongkan", "info"); };
-            
-            const resumeTransaction = async (pendingItem) => { 
-                try {
-                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'pending_carts', pendingItem.id));
-                    setCart(pendingItem.items); 
-                    setIsSessionActive(true);
-                    showToast("Transaksi dilanjutkan");
-                } catch (error) {
-                    showToast("Transaksi sudah diambil atau dihapus", "error");
-                }
-            };
-
-            const handleCheckout = async () => {
-                if (!user) return;
-                if (cart.length === 0) return;
+            const resumeTransaction = async (pendingItem) => { try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'pending_carts', pendingItem.id)); setCart(pendingItem.items); setIsSessionActive(true); showToast("Transaksi dilanjutkan"); } catch (error) { showToast("Transaksi sudah diambil atau dihapus", "error"); } };
+            const handleCheckout = async () => { if (!user) return; if (cart.length === 0) return; const stockIssue = cart.find(c => c.cartQty > safeNumber(c.qty)); if (stockIssue) { showToast(`Stok ${stockIssue.name} tidak cukup!`, "error"); return; } if (safeNumber(paymentAmount) < grandTotal) { showToast("Uang kurang!", "error"); return; } setIsProcessing(true); try { const batch = window.writeBatch(window.db); cart.forEach(item => { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id); const stockField = `stocks.${currentProfile.id}`; batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() }); }); const transactionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions'); const newTransaction = { date: window.serverTimestamp(), items: cart, total: grandTotal, pay: safeNumber(paymentAmount), change: change, status: 'success', cashierName: user.email || 'Admin', storeId: currentProfile.id || 'default', storeName: currentProfile.name }; const docRef = window.doc(transactionRef); batch.set(docRef, newTransaction); await batch.commit(); 
                 
-                // FINAL STOCK CHECK BEFORE CHECKOUT
-                const stockIssue = cart.find(c => c.cartQty > safeNumber(c.qty));
-                if (stockIssue) {
-                    showToast(`Stok ${stockIssue.name} tidak cukup!`, "error");
-                    return;
-                }
+                // LOG
+                logToDB('TRANSAKSI', `Penjualan ${cart.length} item senilai ${formatRupiah(grandTotal)}`, currentProfile.id, user.email);
 
-                if (safeNumber(paymentAmount) < grandTotal) { showToast("Uang kurang!", "error"); return; }
-                setIsProcessing(true);
-                try {
-                    const batch = window.writeBatch(window.db);
-                    
-                    // UPDATE STOCK SPECIFIC TO CURRENT STORE
-                    cart.forEach(item => { 
-                        const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
-                        const stockField = `stocks.${currentProfile.id}`;
-                        batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() }); 
-                    });
-
-                    const transactionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions');
-                    const newTransaction = { 
-                        date: window.serverTimestamp(), 
-                        items: cart, 
-                        total: grandTotal, 
-                        pay: safeNumber(paymentAmount), 
-                        change: change, 
-                        status: 'success', 
-                        cashierName: user.email || 'Admin',
-                        storeId: currentProfile.id || 'default', // Save Store ID
-                        storeName: currentProfile.name // Save Store Name
-                    };
-                    const docRef = window.doc(transactionRef);
-                    batch.set(docRef, newTransaction);
-                    await batch.commit();
-                    setReceiptData({ ...newTransaction, id: docRef.id, date: new Date() }); 
-                    setPaymentSuccess(true); showToast("Transaksi Berhasil!");
-                } catch (error) { console.error(error); showToast("Transaksi Gagal", "error"); } finally { setIsProcessing(false); }
-            };
-
+                setReceiptData({ ...newTransaction, id: docRef.id, date: new Date() }); setPaymentSuccess(true); showToast("Transaksi Berhasil!"); } catch (error) { console.error(error); showToast("Transaksi Gagal", "error"); } finally { setIsProcessing(false); } };
             const handleCloseSuccess = () => { setCheckoutModal(false); setPaymentSuccess(false); setReceiptData(null); setCart([]); setPaymentAmount(''); setIsSessionActive(false); };
-            
-            const handlePrintAction = async () => { 
-                // CONSTRUCT SETTINGS BASED ON CURRENT PROFILE
-                const printSettings = { 
-                    ...settings, 
-                    storeName: currentProfile.name, 
-                    storeAddress: currentProfile.address,
-                    receiptFooter: currentProfile.footer || settings.receiptFooter,
-                    additionalHeaders: currentProfile.additionalHeaders || []
-                };
-                
-                const connected = await printReceipt(receiptData, btDevice, printSettings); 
-                if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak / Bluetooth Mati", "error"); } 
-            };
-
+            const handlePrintAction = async () => { const printSettings = { ...settings, storeName: currentProfile.name, storeAddress: currentProfile.address, receiptFooter: currentProfile.footer || settings.receiptFooter, additionalHeaders: currentProfile.additionalHeaders || [] }; const connected = await printReceipt(receiptData, btDevice, printSettings); if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak / Bluetooth Mati", "error"); } };
             const handleWA = () => { if(receiptData) { onGenerateImage(receiptData); } };
 
             if (!isSessionActive) {
                 return (
                     <div className="fade-in h-full overflow-y-auto pb-20 md:pb-0 flex flex-col items-center justify-center relative z-10">
                         <div className="w-full max-w-sm px-4 flex flex-col items-center">
-                             {/* BANNER TOKO AKTIF */}
-                             <div className="mb-6 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-white shadow-sm w-full text-center">
-                                <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">POS Kasir Aktif</p>
-                                <h2 className="text-xl font-black text-slate-800 flex items-center justify-center gap-2">
-                                    <Icon name="store" className="text-sky-600" /> {currentProfile.name}
-                                </h2>
-                             </div>
-
-                             {pendingCarts.length > 0 && (
-                                <div className="w-full mb-8 fade-in">
-                                    <div className="flex items-center justify-between mb-3 px-1"><div className="flex items-center gap-2"><Icon name="clock-rotate-left" className="text-sky-600" /><h3 className="font-bold text-slate-700 text-sm">Tertunda di {currentProfile.name}</h3></div><span className="text-[10px] bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-bold">{pendingCarts.length} sesi</span></div>
-                                    <div className="space-y-3">{pendingCarts.map(pending => (<button key={pending.id} onClick={() => resumeTransaction(pending)} className="w-full bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-sky-300 transition-all flex items-center justify-between group relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-sky-400 to-sky-600"></div><div className="text-left pl-2"><p className="font-black text-slate-800 text-lg">{formatRupiah(pending.total)}</p><p className="text-xs text-slate-500 font-medium mt-0.5">{pending.items.length} Barang • {new Date(pending.date).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</p><span className="inline-block mt-2 text-[9px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-100">Klik untuk lanjut</span></div><div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors"><Icon name="chevron-right" /></div></button>))}</div>
-                                </div>
-                             )}
+                             <div className="mb-6 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-white shadow-sm w-full text-center"><p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">POS Kasir Aktif</p><h2 className="text-xl font-black text-slate-800 flex items-center justify-center gap-2"><Icon name="store" className="text-sky-600" /> {currentProfile.name}</h2></div>
+                             {pendingCarts.length > 0 && (<div className="w-full mb-8 fade-in"><div className="flex items-center justify-between mb-3 px-1"><div className="flex items-center gap-2"><Icon name="clock-rotate-left" className="text-sky-600" /><h3 className="font-bold text-slate-700 text-sm">Tertunda di {currentProfile.name}</h3></div><span className="text-[10px] bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-bold">{pendingCarts.length} sesi</span></div><div className="space-y-3">{pendingCarts.map(pending => (<button key={pending.id} onClick={() => resumeTransaction(pending)} className="w-full bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-sky-300 transition-all flex items-center justify-between group relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-sky-400 to-sky-600"></div><div className="text-left pl-2"><p className="font-black text-slate-800 text-lg">{formatRupiah(pending.total)}</p><p className="text-xs text-slate-500 font-medium mt-0.5">{pending.items.length} Barang • {new Date(pending.date).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})}</p><span className="inline-block mt-2 text-[9px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-100">Klik untuk lanjut</span></div><div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-sky-50 group-hover:text-sky-600 transition-colors"><Icon name="chevron-right" /></div></button>))}</div></div>)}
                             <button onClick={() => setIsSessionActive(true)} className="group relative w-full aspect-square md:aspect-video rounded-3xl border-4 border-dashed border-sky-300 bg-sky-50/50 hover:bg-sky-100 hover:border-sky-400 transition-all flex flex-col items-center justify-center gap-4 active:scale-95"><div className="w-20 h-20 rounded-full bg-white text-sky-500 shadow-soft flex items-center justify-center text-4xl group-hover:scale-110 transition-transform"><Icon name="cart-plus" /></div><div className="text-center"><h2 className="text-2xl font-black text-slate-700 group-hover:text-sky-700">+ Penjualan Baru</h2><p className="text-sm text-slate-500 font-medium mt-1">Mulai sesi kasir di toko ini</p></div></button>
                         </div>
                     </div>
                 );
             }
-
             return (
                 <div className="fade-in h-full flex flex-col md:flex-row gap-4 pb-20 md:pb-0 relative z-10">
-                    <div className="flex-1 flex flex-col h-full min-h-0">
-                        <div className="flex items-center gap-3 mb-4"><button onClick={handleBack} className="w-10 h-10 rounded-xl bg-white text-slate-400 hover:text-sky-600 hover:border-sky-300 border border-slate-200 flex items-center justify-center shadow-sm transition-colors" title="Kembali & Simpan Sementara"><Icon name="arrow-left" /></button><div className="relative group flex-1"><input autoFocus type="text" placeholder="Ketik nama barang disini..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-200 shadow-soft focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all font-bold text-lg text-slate-700 placeholder:font-normal placeholder:text-slate-400" value={search} onChange={e => setSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-sky-500" /></div></div>
-                        <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 pb-2">
-                            {search === '' ? (<div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60"><Icon name="magnifying-glass" className="text-6xl mb-4 text-slate-300" /><p className="font-semibold text-lg">Mulai ketik untuk mencari barang...</p><p className="text-xs mt-1">Stok diambil dari: <b>{currentProfile.name}</b></p></div>) : (<div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{filteredItems.map(item => { const inCart = cart.find(c => c.id === item.id); const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty : 0); const isOOS = currentStock <= 0; return (<button key={item.id} onClick={() => addToCart(item)} disabled={isOOS} className={`text-left p-3 rounded-xl border transition-all relative overflow-hidden group ${isOOS ? 'bg-slate-100 border-slate-200 opacity-70 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md'}`}>{isNewItem(item.createdAt) && !isOOS && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[8px] font-bold px-1.5 rounded-bl-lg">NEW</span>}<h4 className="font-bold text-slate-800 text-xs line-clamp-2 h-8 leading-snug">{item.name}</h4><div className="mt-2 flex justify-between items-end"><div><p className="text-[10px] text-slate-500 font-medium">{item.unit}</p><p className="text-xs font-bold text-sky-600">{formatRupiah(item.price)}</p></div><div className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isOOS ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>Stok: {currentStock}</div></div>{!isOOS && <div className="absolute inset-0 bg-sky-500/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Icon name="plus" className="text-sky-600 text-xl" /></div>}</button>)})}{filteredItems.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 text-sm">Barang tidak ditemukan</div>}</div>)}
-                        </div>
-                    </div>
-                    <div className="w-full md:w-80 lg:w-96 flex flex-col bg-white rounded-3xl shadow-soft border border-slate-100 h-fit md:h-full max-h-[calc(100vh-100px)]">
-                        <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-3xl flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="cart-shopping" className="text-sky-600" /> Keranjang</h3><span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-1 rounded-full">{cart.length} Item</span></div>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar min-h-[200px]">{cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><Icon name="basket-shopping" className="text-4xl mb-2" /><p className="text-xs font-medium">Keranjang Kosong</p></div>) : (cart.map(item => (<div key={item.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex gap-3 group"><div className="flex-1 min-w-0"><h4 className="text-xs font-bold text-slate-700 truncate">{item.name}</h4><p className="text-[10px] text-slate-500">{formatRupiah(item.price)} x {item.cartQty}</p></div><div className="flex flex-col items-end gap-1"><p className="text-xs font-bold text-slate-800">{formatRupiah(item.price * item.cartQty)}</p><div className="flex items-center gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5"><button onClick={() => updateQty(item.id, -1)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="minus" /></button><span className="text-xs font-bold w-4 text-center">{item.cartQty}</span><button onClick={() => updateQty(item.id, 1)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="plus" /></button></div></div><button onClick={() => removeFromCart(item.id)} className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[8px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-md"><Icon name="xmark" /></button></div>)))}</div>
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-3xl">
-                            <div className="flex justify-between items-end mb-4"><span className="text-xs text-slate-500 font-medium">Total Tagihan</span><span className="text-xl font-black text-slate-800">{formatRupiah(grandTotal)}</span></div>
-                            <button onClick={() => { setPaymentAmount(''); setCheckoutModal(true); }} disabled={cart.length === 0} className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"><Icon name="money-bill-wave" /> Bayar Sekarang</button>
-                            <button onClick={() => setCancelModal(true)} disabled={cart.length === 0} className="w-full mt-3 py-3 rounded-xl border border-red-200 text-red-500 font-bold hover:bg-red-50 transition-all text-sm disabled:opacity-50 disabled:border-slate-200 disabled:text-slate-400 active:scale-95">Batalkan Transaksi</button>
-                        </div>
-                    </div>
-                    {checkoutModal && ( <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"> {!paymentSuccess ? ( <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 relative"> <button onClick={() => setCheckoutModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="xmark" /></button><h3 className="text-lg font-bold text-slate-800 mb-4 text-center">Pembayaran</h3> <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"><div className="flex justify-between mb-2 text-sm text-slate-500"><span>Total Belanja</span><span className="font-bold text-slate-800">{formatRupiah(grandTotal)}</span></div><div className="h-px bg-slate-200 my-2"></div><label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Pilih Nominal Cepat</label><div className="grid grid-cols-2 gap-2 mb-4">{getPaymentSuggestions.map((amount, idx) => (<button key={idx} onClick={() => setPaymentAmount(amount.toString())} className={`py-2 px-1 rounded-lg text-xs font-bold border transition-all active:scale-95 ${safeNumber(paymentAmount) === amount ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-sky-50 hover:border-sky-300'}`}>{amount === grandTotal ? 'Uang Pas' : formatRupiah(amount)}</button>))}</div><div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Atau Ketik Manual</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">Rp</span><input autoFocus type="number" className="w-full pl-10 pr-3 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 outline-none font-bold text-lg text-slate-800" placeholder="0" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} /></div></div><div className={`mt-3 flex justify-between text-sm transition-colors ${change < 0 ? 'text-red-500' : 'text-green-600'}`}><span className="font-medium">Kembalian</span><span className="font-bold">{change < 0 ? '-' : formatRupiah(change)}</span></div></div> <button onClick={handleCheckout} disabled={change < 0 || isProcessing} className="w-full py-3.5 bg-sky-600 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:bg-slate-400 flex justify-center items-center gap-2">{isProcessing ? <div className="typing-dot bg-white"></div> : <><Icon name="wallet" /> BAYAR</>}</button> </div> ) : ( <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 relative flex flex-col items-center text-center pop-in"> <div className="w-24 h-24 relative mb-4"><svg className="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52"><circle className="checkmark__circle" cx="26" cy="26" r="25" fill="none"/><path className="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/></svg></div> <h2 className="text-2xl font-black text-slate-800 mb-1">Transaksi Selesai</h2><p className="text-slate-500 text-sm mb-8">Kembalian: <span className="font-bold text-slate-800">{formatRupiah(receiptData.change)}</span></p> <div className="w-full space-y-3"><button onClick={handlePrintAction} className="w-full py-3 rounded-xl bg-slate-800 text-white font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="print" /> Cetak Bluetooth</button><button onClick={handleWA} className="w-full py-3 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="image" /> Kirim Gambar Struk (WA)</button><button onClick={handleCloseSuccess} className="w-full py-3 rounded-xl border-2 border-slate-100 text-slate-600 font-bold hover:bg-slate-50 active:scale-95 transition-all">Selesaikan Tanpa Struk</button></div> </div> )} </div> )}
+                    <div className="flex-1 flex flex-col h-full min-h-0"><div className="flex items-center gap-3 mb-4"><button onClick={handleBack} className="w-10 h-10 rounded-xl bg-white text-slate-400 hover:text-sky-600 hover:border-sky-300 border border-slate-200 flex items-center justify-center shadow-sm transition-colors" title="Kembali & Simpan Sementara"><Icon name="arrow-left" /></button><div className="relative group flex-1"><input autoFocus type="text" placeholder="Ketik nama barang disini..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-200 shadow-soft focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all font-bold text-lg text-slate-700 placeholder:font-normal placeholder:text-slate-400" value={search} onChange={e => setSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-sky-500" /></div></div><div className="flex-1 overflow-y-auto custom-scrollbar pr-1 pb-2">{search === '' ? (<div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60"><Icon name="magnifying-glass" className="text-6xl mb-4 text-slate-300" /><p className="font-semibold text-lg">Mulai ketik untuk mencari barang...</p><p className="text-xs mt-1">Stok diambil dari: <b>{currentProfile.name}</b></p></div>) : (<div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">{filteredItems.map(item => { const inCart = cart.find(c => c.id === item.id); const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty : 0); const isOOS = currentStock <= 0; return (<button key={item.id} onClick={() => addToCart(item)} disabled={isOOS} className={`text-left p-3 rounded-xl border transition-all relative overflow-hidden group ${isOOS ? 'bg-slate-100 border-slate-200 opacity-70 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-sky-300 hover:shadow-md'}`}>{isNewItem(item.createdAt) && !isOOS && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[8px] font-bold px-1.5 rounded-bl-lg">NEW</span>}<h4 className="font-bold text-slate-800 text-xs line-clamp-2 h-8 leading-snug">{item.name}</h4><div className="mt-2 flex justify-between items-end"><div><p className="text-[10px] text-slate-500 font-medium">{item.unit}</p><p className="text-xs font-bold text-sky-600">{formatRupiah(item.price)}</p></div><div className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${isOOS ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}>Stok: {currentStock}</div></div>{!isOOS && <div className="absolute inset-0 bg-sky-500/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"><Icon name="plus" className="text-sky-600 text-xl" /></div>}</button>)})}{filteredItems.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 text-sm">Barang tidak ditemukan</div>}</div>)}</div></div><div className="w-full md:w-80 lg:w-96 flex flex-col bg-white rounded-3xl shadow-soft border border-slate-100 h-fit md:h-full max-h-[calc(100vh-100px)]"><div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-3xl flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="cart-shopping" className="text-sky-600" /> Keranjang</h3><span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-1 rounded-full">{cart.length} Item</span></div><div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar min-h-[200px]">{cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><Icon name="basket-shopping" className="text-4xl mb-2" /><p className="text-xs font-medium">Keranjang Kosong</p></div>) : (cart.map(item => (<div key={item.id} className="p-3 bg-slate-50 rounded-xl border border-slate-100 flex gap-3 group"><div className="flex-1 min-w-0"><h4 className="text-xs font-bold text-slate-700 truncate">{item.name}</h4><p className="text-[10px] text-slate-500">{formatRupiah(item.price)} x {item.cartQty}</p></div><div className="flex flex-col items-end gap-1"><p className="text-xs font-bold text-slate-800">{formatRupiah(item.price * item.cartQty)}</p><div className="flex items-center gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5"><button onClick={() => updateQty(item.id, -1)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="minus" /></button><span className="text-xs font-bold w-4 text-center">{item.cartQty}</span><button onClick={() => updateQty(item.id, 1)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="plus" /></button></div></div><button onClick={() => removeFromCart(item.id)} className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[8px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center shadow-md"><Icon name="xmark" /></button></div>)))}</div><div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-3xl"><div className="flex justify-between items-end mb-4"><span className="text-xs text-slate-500 font-medium">Total Tagihan</span><span className="text-xl font-black text-slate-800">{formatRupiah(grandTotal)}</span></div><button onClick={() => { setPaymentAmount(''); setCheckoutModal(true); }} disabled={cart.length === 0} className="w-full py-3.5 bg-gradient-to-r from-sky-600 to-sky-500 text-white rounded-xl font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"><Icon name="money-bill-wave" /> Bayar Sekarang</button><button onClick={() => setCancelModal(true)} disabled={cart.length === 0} className="w-full mt-3 py-3 rounded-xl border border-red-200 text-red-500 font-bold hover:bg-red-50 transition-all text-sm disabled:opacity-50 disabled:border-slate-200 disabled:text-slate-400 active:scale-95">Batalkan Transaksi</button></div></div>{checkoutModal && ( <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"> {!paymentSuccess ? ( <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 relative"> <button onClick={() => setCheckoutModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="xmark" /></button><h3 className="text-lg font-bold text-slate-800 mb-4 text-center">Pembayaran</h3> <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"><div className="flex justify-between mb-2 text-sm text-slate-500"><span>Total Belanja</span><span className="font-bold text-slate-800">{formatRupiah(grandTotal)}</span></div><div className="h-px bg-slate-200 my-2"></div><label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Pilih Nominal Cepat</label><div className="grid grid-cols-2 gap-2 mb-4">{getPaymentSuggestions.map((amount, idx) => (<button key={idx} onClick={() => setPaymentAmount(amount.toString())} className={`py-2 px-1 rounded-lg text-xs font-bold border transition-all active:scale-95 ${safeNumber(paymentAmount) === amount ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-sky-50 hover:border-sky-300'}`}>{amount === grandTotal ? 'Uang Pas' : formatRupiah(amount)}</button>))}</div><div className="space-y-1"><label className="text-[10px] font-bold text-slate-400 uppercase">Atau Ketik Manual</label><div className="relative"><span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-bold">Rp</span><input autoFocus type="number" className="w-full pl-10 pr-3 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 outline-none font-bold text-lg text-slate-800" placeholder="0" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} /></div></div><div className={`mt-3 flex justify-between text-sm transition-colors ${change < 0 ? 'text-red-500' : 'text-green-600'}`}><span className="font-medium">Kembalian</span><span className="font-bold">{change < 0 ? '-' : formatRupiah(change)}</span></div></div> <button onClick={handleCheckout} disabled={change < 0 || isProcessing} className="w-full py-3.5 bg-sky-600 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:bg-slate-400 flex justify-center items-center gap-2">{isProcessing ? <div className="typing-dot bg-white"></div> : <><Icon name="wallet" /> BAYAR</>}</button> </div> ) : ( <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 relative flex flex-col items-center text-center pop-in"> <div className="w-24 h-24 relative mb-4"><svg className="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52"><circle className="checkmark__circle" cx="26" cy="26" r="25" fill="none"/><path className="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/></svg></div> <h2 className="text-2xl font-black text-slate-800 mb-1">Transaksi Selesai</h2><p className="text-slate-500 text-sm mb-8">Kembalian: <span className="font-bold text-slate-800">{formatRupiah(receiptData.change)}</span></p> <div className="w-full space-y-3"><button onClick={handlePrintAction} className="w-full py-3 rounded-xl bg-slate-800 text-white font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="print" /> Cetak Bluetooth</button><button onClick={handleWA} className="w-full py-3 rounded-xl bg-green-500 hover:bg-green-600 text-white font-bold shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"><Icon name="image" /> Kirim Gambar Struk (WA)</button><button onClick={handleCloseSuccess} className="w-full py-3 rounded-xl border-2 border-slate-100 text-slate-600 font-bold hover:bg-slate-50 active:scale-95 transition-all">Selesaikan Tanpa Struk</button></div> </div> )} </div> )}
                     <ConfirmModal isOpen={cancelModal} title="Batalkan Transaksi?" message="Keranjang akan dikosongkan dan semua item akan dihapus dari sesi ini." onConfirm={confirmCancel} onCancel={() => setCancelModal(false)} confirmText="Ya, Batalkan" confirmColor="red" />
                 </div>
             );
         };
 
-        // --- HISTORY VIEW (UPDATED PRINT LOGIC) ---
         const HistoryView = ({ user, showToast, settings, onGenerateImage, currentProfile }) => {
             const [transactions, setTransactions] = useState([]);
             const [loading, setLoading] = useState(true);
             const [selectedTx, setSelectedTx] = useState(null);
-            
             const [returModal, setReturModal] = useState({ show: false, tx: null, item: null, index: -1 });
             const [qtyToRetur, setQtyToRetur] = useState(1);
             const [processingRetur, setProcessingRetur] = useState(false);
-            
             const [btDevice, setBtDevice] = useState(null);
             const [selectedDate, setSelectedDate] = useState(new Date());
-
             const [historySearch, setHistorySearch] = useState('');
             const [filterStatus, setFilterStatus] = useState('all'); 
             const [sortOrder, setSortOrder] = useState('newest'); 
@@ -1013,35 +805,15 @@
 
             const changeDate = (days) => { const newDate = new Date(selectedDate); newDate.setDate(selectedDate.getDate() + days); setSelectedDate(newDate); };
             const isSameDay = (d1, d2) => { return d1.getDate() === d2.getDate() && d1.getMonth() === d2.getMonth() && d1.getFullYear() === d2.getFullYear(); };
-            
             const dailyTransactions = useMemo(() => { return transactions.filter(tx => { const txDate = tx.date.seconds ? tx.date.toDate() : new Date(tx.date); return isSameDay(txDate, selectedDate); }); }, [transactions, selectedDate]);
-            
             const processedTransactions = useMemo(() => {
                 let data = [...dailyTransactions];
-                if (historySearch) {
-                    const lowerQ = historySearch.toLowerCase();
-                    data = data.filter(tx => (tx.id && tx.id.toLowerCase().includes(lowerQ)) || (tx.items && tx.items.some(i => i.name.toLowerCase().includes(lowerQ))) );
-                }
+                if (historySearch) { const lowerQ = historySearch.toLowerCase(); data = data.filter(tx => (tx.id && tx.id.toLowerCase().includes(lowerQ)) || (tx.items && tx.items.some(i => i.name.toLowerCase().includes(lowerQ))) ); }
                 if (filterStatus !== 'all') { data = data.filter(tx => tx.status === filterStatus); }
-                data.sort((a, b) => {
-                    const dateA = a.date.seconds ? a.date.toDate() : new Date(a.date);
-                    const dateB = b.date.seconds ? b.date.toDate() : new Date(b.date);
-                    switch (sortOrder) { case 'oldest': return dateA - dateB; case 'highest': return b.total - a.total; case 'lowest': return a.total - b.total; case 'newest': default: return dateB - dateA; }
-                });
+                data.sort((a, b) => { const dateA = a.date.seconds ? a.date.toDate() : new Date(a.date); const dateB = b.date.seconds ? b.date.toDate() : new Date(b.date); switch (sortOrder) { case 'oldest': return dateA - dateB; case 'highest': return b.total - a.total; case 'lowest': return a.total - b.total; case 'newest': default: return dateB - dateA; } });
                 return data;
             }, [dailyTransactions, historySearch, filterStatus, sortOrder]);
-
-            const stats = useMemo(() => {
-                let grossSales = 0, grossCount = 0, returnsValue = 0, returnTxCount = 0;
-                dailyTransactions.forEach(tx => {
-                    grossSales += tx.items.reduce((sum, item) => sum + (item.price * item.cartQty), 0); grossCount++;
-                    let txReturnVal = 0, hasReturn = false;
-                    tx.items.forEach(item => { if (item.returnedQty && item.returnedQty > 0) { txReturnVal += (item.returnedQty * item.price); hasReturn = true; } else if (tx.status === 'returned') { txReturnVal += (item.cartQty * item.price); hasReturn = true; } });
-                    returnsValue += txReturnVal; if (hasReturn) returnTxCount++;
-                });
-                return { netSales: grossSales - returnsValue, grossSales, grossCount, returnsValue, returnTxCount, avgSale: grossCount > 0 ? grossSales / grossCount : 0 };
-            }, [dailyTransactions]);
-
+            const stats = useMemo(() => { let grossSales = 0, grossCount = 0, returnsValue = 0, returnTxCount = 0; dailyTransactions.forEach(tx => { grossSales += tx.items.reduce((sum, item) => sum + (item.price * item.cartQty), 0); grossCount++; let txReturnVal = 0, hasReturn = false; tx.items.forEach(item => { if (item.returnedQty && item.returnedQty > 0) { txReturnVal += (item.returnedQty * item.price); hasReturn = true; } else if (tx.status === 'returned') { txReturnVal += (item.cartQty * item.price); hasReturn = true; } }); returnsValue += txReturnVal; if (hasReturn) returnTxCount++; }); return { netSales: grossSales - returnsValue, grossSales, grossCount, returnsValue, returnTxCount, avgSale: grossCount > 0 ? grossSales / grossCount : 0 }; }, [dailyTransactions]);
             const openReturModal = (tx, item, index) => { const maxRetur = item.cartQty - (item.returnedQty || 0); if (maxRetur <= 0) { showToast("Barang ini sudah diretur semua", "error"); return; } setReturModal({ show: true, tx, item, index, max: maxRetur }); setQtyToRetur(maxRetur); };
             const handleProcessRetur = async () => {
                 const { tx, item, index, max } = returModal;
@@ -1053,7 +825,6 @@
                     const invRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
                     const stockField = `stocks.${storeIdToReturn}`;
                     batch.update(invRef, { [stockField]: window.increment(qtyToRetur) });
-                    
                     const txRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions', tx.id);
                     const updatedItems = [...tx.items];
                     updatedItems[index].returnedQty = (updatedItems[index].returnedQty || 0) + qtyToRetur;
@@ -1063,58 +834,29 @@
                     if (totalReturnedCount === totalItemsCount) newStatus = 'returned'; else if (totalReturnedCount > 0) newStatus = 'partial';
                     batch.update(txRef, { items: updatedItems, status: newStatus, returnedAt: window.serverTimestamp() });
                     await batch.commit();
-                    showToast(`Berhasil meretur ${qtyToRetur} ${item.unit} ke Stok Toko`, "success");
-                    setReturModal({ show: false, tx: null, item: null, index: -1 }); setSelectedTx(null);
+
+                    // LOG
+                    logToDB('RETUR', `Retur ${qtyToRetur} ${item.name} pada TRX ${tx.id.slice(-5)}`, storeIdToReturn, user.email);
+
+                    showToast(`Berhasil meretur ${qtyToRetur} ${item.unit} ke Stok Toko`, "success"); setReturModal({ show: false, tx: null, item: null, index: -1 }); setSelectedTx(null);
                 } catch (error) { console.error("Retur error", error); showToast("Gagal melakukan retur", "error"); } finally { setProcessingRetur(false); }
             };
-
-            const handlePrint = async (tx) => { 
-                // LOOKUP PROFILE FOR THIS TRANSACTION
-                const storeProfiles = settings.storeProfiles || [];
-                const txProfile = storeProfiles.find(p => p.id === tx.storeId) || storeProfiles[0] || {};
-                
-                const printSettings = { 
-                    ...settings, 
-                    storeName: txProfile.name || settings.storeName, 
-                    storeAddress: txProfile.address || settings.storeAddress,
-                    receiptFooter: txProfile.footer || settings.receiptFooter,
-                    additionalHeaders: txProfile.additionalHeaders || []
-                };
-                
-                const connected = await printReceipt(tx, btDevice, printSettings); 
-                if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak", "error"); } 
-            };
+            const handlePrint = async (tx) => { const storeProfiles = settings.storeProfiles || []; const txProfile = storeProfiles.find(p => p.id === tx.storeId) || storeProfiles[0] || {}; const printSettings = { ...settings, storeName: txProfile.name || settings.storeName, storeAddress: txProfile.address || settings.storeAddress, receiptFooter: txProfile.footer || settings.receiptFooter, additionalHeaders: txProfile.additionalHeaders || [] }; const connected = await printReceipt(tx, btDevice, printSettings); if (connected === true || typeof connected === 'object') { if (typeof connected === 'object') setBtDevice(connected); showToast("Mencetak..."); } else { showToast("Gagal Cetak", "error"); } };
             const handleWAHistory = (tx) => { onGenerateImage(tx); };
 
             return (
                 <div className="fade-in pb-20 md:pb-0 h-full flex flex-col relative z-10">
-                    <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div><h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">Riwayat {currentProfile.name}</h2><p className="text-slate-500 text-xs mt-1">Laporan harian & retur {currentProfile.id === 'all_stores' ? '(Semua Toko)' : 'khusus toko ini'}</p></div>
-                        <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm self-start md:self-auto"><button onClick={() => changeDate(-1)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500 transition-colors"><Icon name="chevron-left" /></button><div className="flex items-center gap-2 px-2 text-slate-700 font-bold text-sm min-w-[120px] justify-center"><Icon name="calendar-days" className="text-sky-500" />{selectedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</div><button onClick={() => changeDate(1)} disabled={isSameDay(selectedDate, new Date())} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500 transition-colors disabled:opacity-30"><Icon name="chevron-right" /></button></div>
-                    </header>
+                    <header className="mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h2 className="text-2xl font-extrabold text-slate-800 tracking-tight">Riwayat {currentProfile.name}</h2><p className="text-slate-500 text-xs mt-1">Laporan harian & retur {currentProfile.id === 'all_stores' ? '(Semua Toko)' : 'khusus toko ini'}</p></div><div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-slate-200 shadow-sm self-start md:self-auto"><button onClick={() => changeDate(-1)} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500 transition-colors"><Icon name="chevron-left" /></button><div className="flex items-center gap-2 px-2 text-slate-700 font-bold text-sm min-w-[120px] justify-center"><Icon name="calendar-days" className="text-sky-500" />{selectedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</div><button onClick={() => changeDate(1)} disabled={isSameDay(selectedDate, new Date())} className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500 transition-colors disabled:opacity-30"><Icon name="chevron-right" /></button></div></header>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm"><div className="flex items-center gap-1 mb-1 border-b-2 border-dashed border-slate-200 w-fit pb-0.5"><h4 className="font-bold text-slate-800 text-sm">Total transaksi kasir</h4><Icon name="circle-question" className="text-[10px] text-sky-500 mb-2" /></div><div className="text-2xl font-black text-slate-800 mt-2">{formatRupiah(stats.netSales)}</div><p className="text-xs text-slate-400 mt-1">Net setelah retur</p></div>
                         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm"><div className="flex items-center gap-1 mb-1 border-b-2 border-dashed border-slate-200 w-fit pb-0.5"><h4 className="font-bold text-slate-800 text-sm">Total penjualan kasir</h4><Icon name="circle-question" className="text-[10px] text-sky-500 mb-2" /></div><div className="text-2xl font-black text-slate-800 mt-2">{formatRupiah(stats.grossSales)}</div><p className="text-xs text-slate-400 mt-1">Dari {stats.grossCount} transaksi</p></div>
                         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm"><div className="flex items-center gap-1 mb-1 border-b-2 border-dashed border-slate-200 w-fit pb-0.5"><h4 className="font-bold text-slate-800 text-sm">Total retur kasir</h4><Icon name="circle-question" className="text-[10px] text-sky-500 mb-2" /></div><div className="text-2xl font-black text-red-600 mt-2">-{formatRupiah(stats.returnsValue).replace('Rp','Rp ')}</div><p className="text-xs text-slate-400 mt-1">Dari {stats.returnTxCount} transaksi bermasalah</p></div>
                         <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm"><h4 className="font-bold text-slate-800 text-sm mb-1">Rata-rata penjualan kasir</h4><div className="text-2xl font-black text-slate-800 mt-2">{formatRupiah(stats.avgSale)}</div></div>
                     </div>
-                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm mb-4 space-y-3">
-                         <div className="relative"><input type="text" placeholder="Cari Ref Transaksi / Nama Barang..." className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none text-sm font-medium" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" /></div>
-                        <div className="flex gap-2"><div className="relative flex-1"><select className="w-full appearance-none pl-3 pr-8 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-sky-500" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} ><option value="all">Semua Status</option><option value="success">Sukses</option><option value="partial">Retur Sebagian</option><option value="returned">Retur Full (Batal)</option></select><Icon name="filter" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none" /></div><div className="relative flex-1"><select className="w-full appearance-none pl-3 pr-8 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-sky-500" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} ><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="highest">Total Terbanyak</option><option value="lowest">Total Tersedikit</option></select><Icon name="arrow-down-wide-short" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none" /></div></div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
-                        {loading ? <div className="text-center py-10 text-slate-400"><div className="typing-dot bg-sky-500"></div> Loading...</div> : processedTransactions.length === 0 ? (<div className="text-center py-12 flex flex-col items-center opacity-60"><div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3"><Icon name="calendar-xmark" className="text-2xl text-slate-400" /></div><p className="font-semibold text-slate-500">Tidak ada transaksi</p><p className="text-xs text-slate-400">Sesuai filter pencarian</p></div>) : processedTransactions.map(tx => (<div key={tx.id} onClick={() => setSelectedTx(tx)} className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:shadow-md ${tx.status === 'returned' ? 'bg-red-50 border-red-100 opacity-80' : 'bg-white border-slate-100 hover:border-sky-300'}`}><div className="flex justify-between items-start mb-2"><div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{new Date(tx.date.seconds ? tx.date.toDate() : tx.date).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})} WIB {tx.storeName && `• ${tx.storeName}`}</p><h4 className={`font-black text-lg ${tx.status === 'returned' ? 'text-red-500 line-through' : 'text-slate-800'}`}>{formatRupiah(tx.total)}</h4></div>{tx.status === 'returned' ? <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full">BATAL</span> : (tx.status === 'partial' ? <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full">SEBAGIAN</span> : <span className="bg-green-100 text-green-600 text-[10px] font-bold px-2 py-1 rounded-full">SUKSES</span>)}</div><div className="text-xs text-slate-500 truncate">{tx.items.map(i => i.name).join(', ')}</div><div className="mt-3 flex justify-between items-center border-t border-dashed border-slate-200 pt-2"><span className="text-[10px] font-bold text-slate-400">{tx.items.length} Barang</span><span className="text-[10px] text-sky-600 font-bold flex items-center gap-1">Lihat Detail <Icon name="chevron-right" /></span></div></div>))}
-                    </div>
-                    {selectedTx && (
-                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in">
-                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-0 overflow-hidden flex flex-col max-h-[90vh]">
-                                <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center"><div><h3 className="font-bold text-slate-800">Detail Transaksi</h3><p className="text-[10px] text-slate-500">{selectedTx.id} {selectedTx.storeName ? `(${selectedTx.storeName})` : ''}</p></div><button onClick={() => setSelectedTx(null)} className="w-8 h-8 rounded-full bg-white text-slate-400 hover:text-slate-600 flex items-center justify-center shadow-sm"><Icon name="xmark" /></button></div>
-                                <div className="p-5 overflow-y-auto flex-1"><div className="space-y-4">{selectedTx.items.map((item, idx) => { const returnedQty = item.returnedQty || 0; const remainingQty = item.cartQty - returnedQty; const isFullyReturned = remainingQty === 0; return (<div key={idx} className={`p-3 rounded-xl border ${isFullyReturned ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}><div className="flex justify-between items-start mb-2"><div className="flex-1"><p className={`font-bold text-sm ${isFullyReturned ? 'text-red-600 line-through' : 'text-slate-700'}`}>{item.name}</p><p className="text-[10px] text-slate-500">{item.cartQty} x {formatRupiah(item.price)}</p>{returnedQty > 0 && <span className="text-[9px] font-bold text-red-500 bg-red-100 px-1.5 py-0.5 rounded-sm">Sudah Retur: {returnedQty}</span>}</div><div className="text-right"><p className="font-bold text-slate-800 text-sm">{formatRupiah(item.cartQty * item.price)}</p>{selectedTx.status !== 'returned' && remainingQty > 0 && (<button onClick={() => openReturModal(selectedTx, item, idx)} className="mt-2 bg-white border border-red-200 text-red-500 text-[10px] font-bold px-2 py-1 rounded-lg hover:bg-red-50 transition-colors shadow-sm">Retur Item</button>)}</div></div></div>); })}</div><div className="my-4 border-t border-dashed border-slate-300"></div><div className="flex justify-between text-sm mb-1"><span className="text-slate-500">Total</span><span className="font-bold text-slate-800">{formatRupiah(selectedTx.total)}</span></div><div className="flex justify-between text-sm mb-1"><span className="text-slate-500">Bayar</span><span className="font-bold text-slate-800">{formatRupiah(selectedTx.pay)}</span></div><div className="flex justify-between text-sm"><span className="text-slate-500">Kembali</span><span className="font-bold text-green-600">{formatRupiah(selectedTx.change)}</span></div></div>
-                                <div className="p-5 bg-slate-50 border-t border-slate-100 flex gap-3"><button onClick={() => handleWAHistory(selectedTx)} className="flex-1 py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 font-bold shadow-sm active:scale-95 text-sm flex items-center justify-center gap-2"><Icon name="image" /> Gambar Struk (WA)</button><button onClick={() => handlePrint(selectedTx)} className="flex-1 py-3 rounded-xl bg-slate-800 text-white font-bold shadow-lg active:scale-95 text-sm flex items-center justify-center gap-2"><Icon name="print" /> Cetak Struk</button></div>
-                            </div>
-                        </div>
-                    )}
-                    <ConfirmModal isOpen={returModal.show} title="Retur Barang" message={`Berapa banyak "${returModal.item?.name}" yang ingin diretur? Stok akan kembali ke toko asal.`} onConfirm={handleProcessRetur} onCancel={() => setReturModal({ show: false, tx: null, item: null, index: -1 })} confirmText={processingRetur ? "Memproses..." : "Konfirmasi Retur"}> {returModal.item && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-200"><div className="flex items-center justify-between"><button onClick={() => setQtyToRetur(Math.max(1, qtyToRetur - 1))} className="w-10 h-10 bg-white border border-slate-300 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100"><Icon name="minus" /></button><div className="flex flex-col items-center"><span className="text-2xl font-black text-slate-800">{qtyToRetur}</span><span className="text-[10px] text-slate-400 font-bold uppercase">Maks: {returModal.max}</span></div><button onClick={() => setQtyToRetur(Math.min(returModal.max, qtyToRetur + 1))} className="w-10 h-10 bg-white border border-slate-300 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100"><Icon name="plus" /></button></div><div className="mt-3 text-center"><p className="text-xs text-slate-500">Nilai Pengembalian:</p><p className="text-lg font-bold text-red-600">{formatRupiah(qtyToRetur * returModal.item.price)}</p></div></div>)}</ConfirmModal>
+                    <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm mb-4 space-y-3"><div className="relative"><input type="text" placeholder="Cari Ref Transaksi / Nama Barang..." className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none text-sm font-medium" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm" /></div><div className="flex gap-2"><div className="relative flex-1"><select className="w-full appearance-none pl-3 pr-8 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-sky-500" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} ><option value="all">Semua Status</option><option value="success">Sukses</option><option value="partial">Retur Sebagian</option><option value="returned">Retur Full (Batal)</option></select><Icon name="filter" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none" /></div><div className="relative flex-1"><select className="w-full appearance-none pl-3 pr-8 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-sky-500" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} ><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="highest">Total Terbanyak</option><option value="lowest">Total Tersedikit</option></select><Icon name="arrow-down-wide-short" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none" /></div></div></div>
+                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">{loading ? <div className="text-center py-10 text-slate-400"><div className="typing-dot bg-sky-500"></div> Loading...</div> : processedTransactions.length === 0 ? (<div className="text-center py-12 flex flex-col items-center opacity-60"><div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3"><Icon name="calendar-xmark" className="text-2xl text-slate-400" /></div><p className="font-semibold text-slate-500">Tidak ada transaksi</p><p className="text-xs text-slate-400">Sesuai filter pencarian</p></div>) : processedTransactions.map(tx => (<div key={tx.id} onClick={() => setSelectedTx(tx)} className={`p-4 rounded-2xl border shadow-sm cursor-pointer transition-all hover:shadow-md ${tx.status === 'returned' ? 'bg-red-50 border-red-100 opacity-80' : 'bg-white border-slate-100 hover:border-sky-300'}`}><div className="flex justify-between items-start mb-2"><div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{new Date(tx.date.seconds ? tx.date.toDate() : tx.date).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'})} WIB {tx.storeName && `• ${tx.storeName}`}</p><h4 className={`font-black text-lg ${tx.status === 'returned' ? 'text-red-500 line-through' : 'text-slate-800'}`}>{formatRupiah(tx.total)}</h4></div>{tx.status === 'returned' ? <span className="bg-red-100 text-red-600 text-[10px] font-bold px-2 py-1 rounded-full">BATAL</span> : (tx.status === 'partial' ? <span className="bg-amber-100 text-amber-600 text-[10px] font-bold px-2 py-1 rounded-full">SEBAGIAN</span> : <span className="bg-green-100 text-green-600 text-[10px] font-bold px-2 py-1 rounded-full">SUKSES</span>)}</div><div className="text-xs text-slate-500 truncate">{tx.items.map(i => i.name).join(', ')}</div><div className="mt-3 flex justify-between items-center border-t border-dashed border-slate-200 pt-2"><span className="text-[10px] font-bold text-slate-400">{tx.items.length} Barang</span><span className="text-[10px] text-sky-600 font-bold flex items-center gap-1">Lihat Detail <Icon name="chevron-right" /></span></div></div>))}</div>
+                    {selectedTx && (<div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm fade-in"><div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-0 overflow-hidden flex flex-col max-h-[90vh]"><div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center"><div><h3 className="font-bold text-slate-800">Detail Transaksi</h3><p className="text-[10px] text-slate-500">{selectedTx.id} {selectedTx.storeName ? `(${selectedTx.storeName})` : ''}</p></div><button onClick={() => setSelectedTx(null)} className="w-8 h-8 rounded-full bg-white text-slate-400 hover:text-slate-600 flex items-center justify-center shadow-sm"><Icon name="xmark" /></button></div><div className="p-5 overflow-y-auto flex-1"><div className="space-y-4">{selectedTx.items.map((item, idx) => { const returnedQty = item.returnedQty || 0; const remainingQty = item.cartQty - returnedQty; const isFullyReturned = remainingQty === 0; return (<div key={idx} className={`p-3 rounded-xl border ${isFullyReturned ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}><div className="flex justify-between items-start mb-2"><div className="flex-1"><p className={`font-bold text-sm ${isFullyReturned ? 'text-red-600 line-through' : 'text-slate-700'}`}>{item.name}</p><p className="text-[10px] text-slate-500">{item.cartQty} x {formatRupiah(item.price)}</p>{returnedQty > 0 && <span className="text-[9px] font-bold text-red-500 bg-red-100 px-1.5 py-0.5 rounded-sm">Sudah Retur: {returnedQty}</span>}</div><div className="text-right"><p className="font-bold text-slate-800 text-sm">{formatRupiah(item.cartQty * item.price)}</p>{selectedTx.status !== 'returned' && remainingQty > 0 && (<button onClick={() => openReturModal(selectedTx, item, idx)} className="mt-2 bg-white border border-red-200 text-red-500 text-[10px] font-bold px-2 py-1 rounded-lg hover:bg-red-50 transition-colors shadow-sm">Retur Item</button>)}</div></div></div>); })}</div><div className="my-4 border-t border-dashed border-slate-300"></div><div className="flex justify-between text-sm mb-1"><span className="text-slate-500">Total</span><span className="font-bold text-slate-800">{formatRupiah(selectedTx.total)}</span></div><div className="flex justify-between text-sm mb-1"><span className="text-slate-500">Bayar</span><span className="font-bold text-slate-800">{formatRupiah(selectedTx.pay)}</span></div><div className="flex justify-between text-sm"><span className="text-slate-500">Kembali</span><span className="font-bold text-green-600">{formatRupiah(selectedTx.change)}</span></div></div><div className="p-5 bg-slate-50 border-t border-slate-100 flex gap-3"><button onClick={() => handleWAHistory(selectedTx)} className="flex-1 py-3 rounded-xl bg-green-500 text-white hover:bg-green-600 font-bold shadow-sm active:scale-95 text-sm flex items-center justify-center gap-2"><Icon name="image" /> Gambar Struk (WA)</button><button onClick={() => handlePrint(selectedTx)} className="flex-1 py-3 rounded-xl bg-slate-800 text-white font-bold shadow-lg active:scale-95 text-sm flex items-center justify-center gap-2"><Icon name="print" /> Cetak Struk</button></div></div></div>)}
+                    <ConfirmModal isOpen={returModal.show} title="Retur Barang" message={`Berapa banyak "${returModal.item?.name}"? Stok akan kembali ke toko asal.`} onConfirm={handleProcessRetur} onCancel={() => setReturModal({ show: false, tx: null, item: null, index: -1 })} confirmText={processingRetur ? "Memproses..." : "Konfirmasi Retur"}> {returModal.item && (<div className="bg-slate-50 p-4 rounded-xl border border-slate-200"><div className="flex items-center justify-between"><button onClick={() => setQtyToRetur(Math.max(1, qtyToRetur - 1))} className="w-10 h-10 bg-white border border-slate-300 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100"><Icon name="minus" /></button><div className="flex flex-col items-center"><span className="text-2xl font-black text-slate-800">{qtyToRetur}</span><span className="text-[10px] text-slate-400 font-bold uppercase">Maks: {returModal.max}</span></div><button onClick={() => setQtyToRetur(Math.min(returModal.max, qtyToRetur + 1))} className="w-10 h-10 bg-white border border-slate-300 rounded-lg flex items-center justify-center text-slate-500 hover:bg-slate-100"><Icon name="plus" /></button></div><div className="mt-3 text-center"><p className="text-xs text-slate-500">Nilai Pengembalian:</p><p className="text-lg font-bold text-red-600">{formatRupiah(qtyToRetur * returModal.item.price)}</p></div></div>)}</ConfirmModal>
                 </div>
             );
         };
@@ -1145,7 +887,6 @@
                     const rack = parts[3]?.trim() || '-';
                     const exp = parts[4]?.trim() || '';
                     const price = parts[5]?.trim() ? parseFloat(parts[5].trim().replace(/[Rp.,]/g, '')) : 0;
-                    
                     if (name) results.push({ name, qty: safeNumber(qty), unit, rack, exp, price: safeNumber(price) });
                 });
                 setParsedItems(results);
@@ -1156,46 +897,24 @@
                 if (!user) return;
                 setIsImporting(true);
                 let successCount = 0;
-
                 try {
-                    const batchSize = 400;
-                    const chunks = [];
-                    for (let i = 0; i < parsedItems.length; i += batchSize) {
-                        chunks.push(parsedItems.slice(i, i + batchSize));
-                    }
-
+                    const batchSize = 400; const chunks = [];
+                    for (let i = 0; i < parsedItems.length; i += batchSize) { chunks.push(parsedItems.slice(i, i + batchSize)); }
                     const collectionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory');
-                    
                     for (let i = 0; i < chunks.length; i++) {
                         const batch = window.writeBatch(window.db);
                         chunks[i].forEach(item => {
                             const docRef = window.doc(collectionRef);
-                            batch.set(docRef, {
-                                name: item.name,
-                                unit: item.unit,
-                                rack: item.rack,
-                                exp: item.exp,
-                                price: item.price,
-                                stocks: { [currentProfile.id]: item.qty }, 
-                                qty: item.qty, // Legacy fallback
-                                createdAt: window.serverTimestamp(),
-                                updatedAt: window.serverTimestamp()
-                            });
+                            batch.set(docRef, { name: item.name, unit: item.unit, rack: item.rack, exp: item.exp, price: item.price, stocks: { [currentProfile.id]: item.qty }, qty: item.qty, createdAt: window.serverTimestamp(), updatedAt: window.serverTimestamp() });
                         });
-                        
                         await batch.commit();
                         successCount += chunks[i].length;
                         setProgress(Math.round(((i + 1) / chunks.length) * 100));
                     }
-
                     setIsImporting(false);
                     onImportComplete(successCount);
                     setTextInput(''); setParsedItems([]); setStep('input'); setProgress(0);
-                } catch (error) {
-                    console.error("Bulk Import Error:", error);
-                    setIsImporting(false);
-                    alert("Terjadi kesalahan saat import data.");
-                }
+                } catch (error) { console.error("Bulk Import Error:", error); setIsImporting(false); alert("Terjadi kesalahan saat import data."); }
             };
 
             const exampleText = `Amoxsan 500mg, 10, Box, A-1, , 50000\nParacetamol Sirup, 5, Botol, B-2, 2024-12-31, 15000\nVitamin C IPI, 50, Botol, Kasir, , 8000`;
@@ -1203,29 +922,8 @@
             return (
                 <div className="fade-in max-w-2xl mx-auto w-full pt-4 md:pt-10">
                     <div className="bg-white/80 backdrop-blur-md p-6 rounded-[30px] shadow-soft border border-white">
-                        <header className="mb-6 flex items-center gap-4">
-                            <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-2xl flex items-center justify-center text-xl shadow-sm"><Icon name="file-import" /></div>
-                            <div><h2 className="text-xl font-bold text-slate-800">Import Masal</h2><p className="text-xs text-slate-400">Menambah stok ke: <b>{currentProfile.name}</b></p></div>
-                        </header>
-                        
-                        {step === 'input' ? (
-                            <div className="space-y-4">
-                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600"><p className="font-bold mb-1">Format (Excel/Tab atau Koma):</p><code className="block bg-slate-100 p-2 rounded text-slate-800 font-mono border border-slate-200">Nama, Qty, Satuan, Rak, Exp, Harga</code><button onClick={() => setTextInput(exampleText)} className="mt-2 text-[10px] font-bold text-sky-500 hover:underline">+ Pakai Contoh Format</button></div>
-                                <textarea className="w-full h-48 p-4 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-sky-200 outline-none text-sm font-mono whitespace-pre" placeholder={`Paste data Excel di sini...\nContoh:\nPanadol, 10, strip, A1, , 10000`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea>
-                                <button onClick={handleParse} disabled={!textInput.trim()} className="w-full py-3.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:scale-100"><Icon name="magnifying-glass-chart" /> Analisa Data</button>
-                            </div>
-                        ) : (
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Preview ({parsedItems.length} Item)</h3><button onClick={() => setStep('input')} className="text-xs text-slate-400 font-medium hover:text-slate-600">Ubah Data</button></div>
-                                <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl bg-white custom-scrollbar">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead className="bg-slate-50 sticky top-0"><tr><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Nama</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Qty</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Rak</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Harga</th></tr></thead>
-                                        <tbody className="divide-y divide-slate-100">{parsedItems.map((item, idx) => (<tr key={idx} className="text-xs text-slate-700 hover:bg-slate-50"><td className="p-3 font-medium">{item.name}</td><td className="p-3 font-bold">{item.qty} {item.unit}</td><td className="p-3 text-slate-500">{item.rack}</td><td className="p-3 text-slate-500">{formatRupiah(item.price)}</td></tr>))}</tbody>
-                                    </table>
-                                </div>
-                                {isImporting ? (<div className="space-y-2"><div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${progress}%` }}></div></div><p className="text-center text-xs text-slate-500 font-medium">Menyimpan ke Cloud... {progress}%</p></div>) : (<div className="flex gap-3"><button onClick={() => setStep('input')} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm">Kembali</button><button onClick={handleBulkSave} className="flex-1 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all text-sm">Simpan ke Database</button></div>)}
-                            </div>
-                        )}
+                        <header className="mb-6 flex items-center gap-4"><div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-2xl flex items-center justify-center text-xl shadow-sm"><Icon name="file-import" /></div><div><h2 className="text-xl font-bold text-slate-800">Import Masal</h2><p className="text-xs text-slate-400">Menambah stok ke: <b>{currentProfile.name}</b></p></div></header>
+                        {step === 'input' ? (<div className="space-y-4"><div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600"><p className="font-bold mb-1">Format (Excel/Tab atau Koma):</p><code className="block bg-slate-100 p-2 rounded text-slate-800 font-mono border border-slate-200">Nama, Qty, Satuan, Rak, Exp, Harga</code><button onClick={() => setTextInput(exampleText)} className="mt-2 text-[10px] font-bold text-sky-500 hover:underline">+ Pakai Contoh Format</button></div><textarea className="w-full h-48 p-4 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-sky-200 outline-none text-sm font-mono whitespace-pre" placeholder={`Paste data Excel di sini...\nContoh:\nPanadol, 10, strip, A1, , 10000`} value={textInput} onChange={e => setTextInput(e.target.value)}></textarea><button onClick={handleParse} disabled={!textInput.trim()} className="w-full py-3.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:scale-100"><Icon name="magnifying-glass-chart" /> Analisa Data</button></div>) : (<div className="space-y-4"><div className="flex justify-between items-center"><h3 className="font-bold text-slate-700">Preview ({parsedItems.length} Item)</h3><button onClick={() => setStep('input')} className="text-xs text-slate-400 font-medium hover:text-slate-600">Ubah Data</button></div><div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl bg-white custom-scrollbar"><table className="w-full text-left border-collapse"><thead className="bg-slate-50 sticky top-0"><tr><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Nama</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Qty</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Rak</th><th className="p-3 text-[10px] font-bold text-slate-500 uppercase">Harga</th></tr></thead><tbody className="divide-y divide-slate-100">{parsedItems.map((item, idx) => (<tr key={idx} className="text-xs text-slate-700 hover:bg-slate-50"><td className="p-3 font-medium">{item.name}</td><td className="p-3 font-bold">{item.qty} {item.unit}</td><td className="p-3 text-slate-500">{item.rack}</td><td className="p-3 text-slate-500">{formatRupiah(item.price)}</td></tr>))}</tbody></table></div>{isImporting ? (<div className="space-y-2"><div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-sky-500 transition-all duration-300" style={{ width: `${progress}%` }}></div></div><p className="text-center text-xs text-slate-500 font-medium">Menyimpan ke Cloud... {progress}%</p></div>) : (<div className="flex gap-3"><button onClick={() => setStep('input')} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold text-sm">Kembali</button><button onClick={handleBulkSave} className="flex-1 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold shadow-lg shadow-sky-200 active:scale-95 transition-all text-sm">Simpan ke Database</button></div>)}</div>)}
                     </div>
                 </div>
             );
@@ -1350,6 +1048,87 @@
                 if (loaderRef.current) observer.observe(loaderRef.current); return () => { if (loaderRef.current) observer.unobserve(loaderRef.current); }
             }, [filteredItems.length, displayedLimit]);
 
+            // --- EXPORT EXCEL FUNCTION (UPDATED: HEADER "NAMA BARANG" CENTER, CONTENT LEFT) ---
+            const handleExportExcel = () => {
+                if (currentProfile.id !== 'all_stores') return;
+                
+                const profiles = settings.storeProfiles || [];
+                
+                // Construct HTML for Excel
+                // Using a simple HTML table allows for formatting like BOLD headers
+                let html = `
+                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                    <head>
+                        <!--[if gte mso 9]>
+                        <xml>
+                            <x:ExcelWorkbook>
+                                <x:ExcelWorksheets>
+                                    <x:ExcelWorksheet>
+                                        <x:Name>Stok Gabungan</x:Name>
+                                        <x:WorksheetOptions>
+                                            <x:DisplayGridlines/>
+                                        </x:WorksheetOptions>
+                                    </x:ExcelWorksheet>
+                                </x:ExcelWorksheets>
+                            </x:ExcelWorkbook>
+                        </xml>
+                        <![endif]-->
+                        <style>
+                            th { font-weight: bold; background-color: #f0f0f0; border: 1px solid #000; padding: 5px; }
+                            td { border: 1px solid #ccc; padding: 5px; }
+                        </style>
+                    </head>
+                    <body>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="text-align: center;">Nama Barang</th> <!-- Updated to Center -->
+                                    <th style="text-align: center;">Stok</th>
+                                    ${profiles.map(p => `<th style="text-align: center;">${p.name}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                // Data Rows
+                filteredItems.forEach(item => {
+                    let total = 0;
+                    const perStore = profiles.map(p => {
+                        const qty = (item.stocks && item.stocks[p.id]) ? item.stocks[p.id] : 0;
+                        total += qty;
+                        return qty;
+                    });
+                    
+                    // Note: item.qty is already the total in 'all_stores' mode
+                    
+                    html += `
+                        <tr>
+                            <td style="text-align: left;">${item.name}</td> <!-- Remains Left Aligned -->
+                            <td style="text-align: center;">${total}</td>
+                            ${perStore.map(val => `<td style="text-align: center;">${val}</td>`).join('')}
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+                    </body>
+                    </html>
+                `;
+
+                // Download
+                const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.setAttribute("download", `Stok_Gabungan_${new Date().toLocaleDateString('id-ID').replace(/\//g, '-')}.xls`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                onCopySuccess("File Excel berhasil diunduh (Header Center)!");
+            };
+
             const handleCopyToWA = () => {
                 const now = new Date(); const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getFullYear()).slice(-2)}`;
                 let title = `${currentProfile.name}`; if (showOnlyLowStock) title += " (MENIPIS)";
@@ -1381,6 +1160,11 @@
                             <p className="text-slate-500 text-xs mt-1">Stok: <b>{currentProfile.name}</b> • Total: {filteredItems.length}</p>
                         </div>
                         <div className="flex flex-wrap gap-2 items-end">
+                            {currentProfile.id === 'all_stores' && (
+                                <button onClick={handleExportExcel} className="py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all bg-emerald-600 hover:bg-emerald-700 text-white shadow-md active:scale-95">
+                                    <Icon name="file-excel" /> Export Excel
+                                </button>
+                            )}
                             <button onClick={handleCopyToWA} className="py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all bg-[#25D366] hover:bg-[#128C7E] text-white shadow-md active:scale-95"><Icon name="whatsapp" type="brands" className="text-sm" /> Salin WA</button>
                             <button onClick={() => setShowOnlyLowStock(!showOnlyLowStock)} className={`py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all border min-w-[90px] ${showOnlyLowStock ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}><Icon name="filter" /> {showOnlyLowStock ? 'Reset Low' : 'Filter Low'}</button>
                             <div className="relative min-w-[140px] md:min-w-[160px]" ref={dropdownRef}>
@@ -1418,27 +1202,11 @@
 
         const FormView = ({ formData, setFormData, onSubmit, isEditing, onCancel, submitting, currentProfile }) => {
             const unitOptions = [ "Pcs", "Box", "Botol", "Strip", "Tube", "Ampul", "Vial", "Tablet", "Kapsul", "Sachet", "Pack", "Roll", "Set", "Lembar", "Pasang", "Galon" ];
-            
-            if (currentProfile.id === 'all_stores') {
-                return (
-                     <div className="fade-in max-w-xl mx-auto w-full pt-10 text-center">
-                         <div className="bg-white/90 p-8 rounded-3xl shadow-soft">
-                             <div className="text-amber-500 text-4xl mb-3"><Icon name="triangle-exclamation" /></div>
-                             <h3 className="text-xl font-bold text-slate-800 mb-2">Mode Gabungan</h3>
-                             <p className="text-slate-500 text-sm">Anda tidak bisa mengedit stok saat melihat mode "Semua Toko". Silakan pilih toko spesifik terlebih dahulu.</p>
-                         </div>
-                     </div>
-                );
-            }
-
+            if (currentProfile.id === 'all_stores') { return ( <div className="fade-in max-w-xl mx-auto w-full pt-10 text-center"> <div className="bg-white/90 p-8 rounded-3xl shadow-soft"> <div className="text-amber-500 text-4xl mb-3"><Icon name="triangle-exclamation" /></div> <h3 className="text-xl font-bold text-slate-800 mb-2">Mode Gabungan</h3> <p className="text-slate-500 text-sm">Anda tidak bisa mengedit stok saat melihat mode "Semua Toko". Silakan pilih toko spesifik terlebih dahulu.</p> </div> </div> ); }
             return (
                 <div className="fade-in max-w-xl mx-auto w-full pt-4 md:pt-10">
                     <div className="bg-white/90 backdrop-blur-sm p-6 md:p-8 rounded-[30px] shadow-soft border border-white">
-                        <header className="mb-6 text-center">
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl mx-auto mb-3 shadow-lg ${isEditing ? 'bg-slate-100 text-slate-600' : 'bg-sky-50 text-sky-600'}`}><Icon name={isEditing ? 'pen-to-square' : 'circle-plus'} /></div>
-                            <h2 className="text-xl font-bold text-slate-800">{isEditing ? 'Edit Barang' : 'Input Baru'}</h2>
-                            <p className="text-xs text-slate-400 mt-1">Stok akan ditambahkan ke: <b>{currentProfile.name}</b></p>
-                        </header>
+                        <header className="mb-6 text-center"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl mx-auto mb-3 shadow-lg ${isEditing ? 'bg-slate-100 text-slate-600' : 'bg-sky-50 text-sky-600'}`}><Icon name={isEditing ? 'pen-to-square' : 'circle-plus'} /></div><h2 className="text-xl font-bold text-slate-800">{isEditing ? 'Edit Barang' : 'Input Baru'}</h2><p className="text-xs text-slate-400 mt-1">Stok akan ditambahkan ke: <b>{currentProfile.name}</b></p></header>
                         <form onSubmit={onSubmit} className="space-y-4">
                             <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Nama Produk</label><input className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white outline-none transition-all font-semibold text-sm text-slate-700 focus:border-slate-400" placeholder="Contoh: Paracetamol 500mg" value={formData.name || ''} onChange={e=>setFormData({...formData, name: e.target.value})} required /></div>
                             <div className="grid grid-cols-2 gap-3"><div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Harga Satuan (Rp)</label><input type="number" className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white outline-none transition-all font-bold text-sm text-slate-700 focus:border-slate-400" placeholder="0" value={formData.price || ''} onChange={e=>setFormData({...formData, price: e.target.value})} /></div><div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Lokasi Rak</label><input className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 outline-none font-medium text-sm transition-all focus:bg-white focus:border-slate-400" placeholder="Ex: A-01" value={formData.rack || ''} onChange={e=>setFormData({...formData, rack: e.target.value})} /></div></div>
@@ -1454,7 +1222,7 @@
 
         const App = () => {
             const [inventoryData, setInventoryData] = useState([]);
-            const [rawInventory, setRawInventory] = useState([]); // Store original data from DB
+            const [rawInventory, setRawInventory] = useState([]);
             const [settingsData, setSettingsData] = useState(DEFAULT_SETTINGS); 
             const [loading, setLoading] = useState(true);
             const [activeTab, setActiveTab] = useState('cashier'); 
@@ -1473,17 +1241,13 @@
             const [isGeneratingImage, setIsGeneratingImage] = useState(false);
             const [activeStoreId, setActiveStoreId] = useState(localStorage.getItem('activeStoreId') || 'default');
             const [showStoreMenu, setShowStoreMenu] = useState(false);
+            
+            // Notification State
+            const [showNotifications, setShowNotifications] = useState(false);
 
-            useEffect(() => {
-                const initAuth = async () => { if (window.initialAuthToken) { await window.signInWithCustomToken(window.auth, window.initialAuthToken); } else { await window.signInAnonymously(window.auth); } };
-                initAuth();
-                const unsubscribeAuth = window.onAuthStateChanged(window.auth, (currentUser) => { setUser(currentUser); if (!currentUser) setLoading(true); });
-                return () => unsubscribeAuth();
-            }, []);
-
+            useEffect(() => { const initAuth = async () => { if (window.initialAuthToken) { await window.signInWithCustomToken(window.auth, window.initialAuthToken); } else { await window.signInAnonymously(window.auth); } }; initAuth(); const unsubscribeAuth = window.onAuthStateChanged(window.auth, (currentUser) => { setUser(currentUser); if (!currentUser) setLoading(true); }); return () => unsubscribeAuth(); }, []);
             useEffect(() => { const globalClickHandler = (e) => { triggerFireworks(e.clientX, e.clientY); }; window.addEventListener('click', globalClickHandler); return () => window.removeEventListener('click', globalClickHandler); }, []);
 
-            // 1. Fetch Global Settings
             useEffect(() => {
                 if(!user) return;
                 const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'settings', 'global');
@@ -1492,7 +1256,6 @@
                         const fetched = docSnap.data();
                         setSettingsData({ ...DEFAULT_SETTINGS, ...fetched }); 
                         const profiles = fetched.storeProfiles || [{ id: 'default' }];
-                        // Jangan override activeStoreId jika sudah diset ke all_stores
                         if(activeStoreId !== 'all_stores' && !profiles.find(p => p.id === activeStoreId)) { 
                             setActiveStoreId(profiles[0].id); 
                             localStorage.setItem('activeStoreId', profiles[0].id); 
@@ -1502,7 +1265,6 @@
                 return () => unsub();
             }, [user, activeStoreId]);
 
-            // 2. Fetch Raw Inventory
             useEffect(() => {
                 if (!user) return;
                 const q = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory'));
@@ -1514,94 +1276,31 @@
                 return () => unsubscribeSnapshot();
             }, [user]);
 
-            // 3. Process Inventory based on Active Store (Updated for All Stores logic)
             useEffect(() => {
                 const processed = rawInventory.map(item => {
                     let displayQty = 0;
                     let breakdown = [];
-                    
                     if (activeStoreId === 'all_stores') {
                         const profiles = settingsData.storeProfiles || [{id: 'default', name: APP_NAME}];
                         let total = 0;
-                        profiles.forEach(p => {
-                            const q = (item.stocks && item.stocks[p.id] !== undefined) ? item.stocks[p.id] : (p.id === 'default' ? (item.qty || 0) : 0);
-                            total += q;
-                            breakdown.push(`${p.name}: ${q}`);
-                        });
+                        profiles.forEach(p => { const q = (item.stocks && item.stocks[p.id] !== undefined) ? item.stocks[p.id] : (p.id === 'default' ? (item.qty || 0) : 0); total += q; breakdown.push(`${p.name}: ${q}`); });
                         displayQty = total;
                     } else {
-                        if (item.stocks && item.stocks[activeStoreId] !== undefined) {
-                            displayQty = item.stocks[activeStoreId];
-                        } else if (activeStoreId === 'default') {
-                            displayQty = item.qty || 0;
-                        } else {
-                            displayQty = 0;
-                        }
+                        if (item.stocks && item.stocks[activeStoreId] !== undefined) { displayQty = item.stocks[activeStoreId]; } else if (activeStoreId === 'default') { displayQty = item.qty || 0; } else { displayQty = 0; }
                     }
-
                     return { ...item, qty: displayQty, _originalQty: item.qty, _breakdown: breakdown };
                 });
                 processed.sort((a, b) => a.name.localeCompare(b.name));
                 setInventoryData(processed);
             }, [rawInventory, activeStoreId, settingsData]);
 
-            const uniqueRacksData = useMemo(() => {
-                const rackMap = new Map();
-                inventoryData.forEach(item => {
-                    if (item.rack && item.rack !== '-') {
-                        const racks = item.rack.split(',').map(r => r.trim());
-                        let isItemNew = isNewItem(item.createdAt);
-                        racks.forEach(r => { if (!r) return; if (!rackMap.has(r)) rackMap.set(r, { name: r, hasNew: false }); if (isItemNew) rackMap.get(r).hasNew = true; });
-                    }
-                });
-                return Array.from(rackMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-            }, [inventoryData]);
-
-            const getCurrentProfile = () => { 
-                if (activeStoreId === 'all_stores') {
-                    return { id: 'all_stores', name: 'SEMUA TOKO', address: 'Mode Gabungan' };
-                }
-                const profiles = settingsData.storeProfiles || []; 
-                const profile = profiles.find(p => p.id === activeStoreId); 
-                return profile || { id: 'default', name: settingsData.storeName || APP_NAME, address: settingsData.storeAddress || '' }; 
-            };
+            const uniqueRacksData = useMemo(() => { const rackMap = new Map(); inventoryData.forEach(item => { if (item.rack && item.rack !== '-') { const racks = item.rack.split(',').map(r => r.trim()); let isItemNew = isNewItem(item.createdAt); racks.forEach(r => { if (!r) return; if (!rackMap.has(r)) rackMap.set(r, { name: r, hasNew: false }); if (isItemNew) rackMap.get(r).hasNew = true; }); } }); return Array.from(rackMap.values()).sort((a, b) => a.name.localeCompare(b.name)); }, [inventoryData]);
+            const getCurrentProfile = () => { if (activeStoreId === 'all_stores') { return { id: 'all_stores', name: 'SEMUA TOKO', address: 'Mode Gabungan' }; } const profiles = settingsData.storeProfiles || []; const profile = profiles.find(p => p.id === activeStoreId); return profile || { id: 'default', name: settingsData.storeName || APP_NAME, address: settingsData.storeAddress || '' }; };
             const currentProfile = getCurrentProfile();
 
             const handleSwitchStore = (profileId) => { setActiveStoreId(profileId); localStorage.setItem('activeStoreId', profileId); setShowStoreMenu(false); showToast(`Profil toko diganti`); };
             const showToast = useCallback((message, type = "success") => { setToast({ show: true, message, type }); setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 3000); }, []);
-
-            const handleGenerateImage = async (transaction) => {
-                setIsGeneratingImage(true); 
-                
-                // Get profile for receipt display (fallback to current if not in tx)
-                const storeProfiles = settingsData.storeProfiles || [];
-                const txProfile = storeProfiles.find(p => p.id === transaction.storeId) || storeProfiles[0] || {};
-                
-                // Pass correct details to the receipt hidden container via receiptToPrint
-                setReceiptToPrint({
-                     ...transaction,
-                     storeName: txProfile.name || settingsData.storeName,
-                     storeAddress: txProfile.address || settingsData.storeAddress,
-                     footer: txProfile.footer || settingsData.receiptFooter,
-                     headers: txProfile.additionalHeaders || []
-                }); 
-                
-                showToast("Membuat gambar struk...");
-                setTimeout(async () => {
-                    const element = document.getElementById('receipt-hidden-container');
-                    if (!element) { showToast("Gagal menemukan elemen struk", "error"); setIsGeneratingImage(false); return; }
-                    try {
-                        const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-                        canvas.toBlob(async (blob) => {
-                            if (!blob) return;
-                            const file = new File([blob], `struk-${transaction.id || 'trx'}.jpg`, { type: 'image/jpeg' });
-                            const shareData = { files: [file], title: 'Struk Belanja', text: `Struk Transaksi ${transaction.id || ''}` };
-                            if (navigator.canShare && navigator.canShare(shareData)) { try { await navigator.share(shareData); showToast("Berhasil membuka menu share!"); } catch (err) { const link = document.createElement('a'); link.href = canvas.toDataURL('image/jpeg'); link.download = `struk-${transaction.id}.jpg`; link.click(); } } else { const link = document.createElement('a'); link.href = canvas.toDataURL('image/jpeg'); link.download = `struk-${transaction.id}.jpg`; link.click(); showToast("Gambar diunduh. Kirim manual ke WA Web."); }
-                            setIsGeneratingImage(false); setReceiptToPrint(null);
-                        }, 'image/jpeg', 0.9);
-                    } catch (error) { console.error("Image gen error:", error); showToast("Gagal membuat gambar", "error"); setIsGeneratingImage(false); setReceiptToPrint(null); }
-                }, 500);
-            };
+            const handleGenerateImage = async (transaction) => { setIsGeneratingImage(true); const storeProfiles = settingsData.storeProfiles || []; const txProfile = storeProfiles.find(p => p.id === transaction.storeId) || storeProfiles[0] || {}; setReceiptToPrint({ ...transaction, storeName: txProfile.name || settingsData.storeName, storeAddress: txProfile.address || settingsData.storeAddress, footer: txProfile.footer || settingsData.receiptFooter, headers: txProfile.additionalHeaders || [] }); showToast("Membuat gambar struk..."); setTimeout(async () => { const element = document.getElementById('receipt-hidden-container'); if (!element) { showToast("Gagal menemukan elemen struk", "error"); setIsGeneratingImage(false); return; } try { const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }); canvas.toBlob(async (blob) => { if (!blob) return; const file = new File([blob], `struk-${transaction.id || 'trx'}.jpg`, { type: 'image/jpeg' }); const shareData = { files: [file], title: 'Struk Belanja', text: `Struk Transaksi ${transaction.id || ''}` }; if (navigator.canShare && navigator.canShare(shareData)) { try { await navigator.share(shareData); showToast("Berhasil membuka menu share!"); } catch (err) { const link = document.createElement('a'); link.href = canvas.toDataURL('image/jpeg'); link.download = `struk-${transaction.id}.jpg`; link.click(); } } else { const link = document.createElement('a'); link.href = canvas.toDataURL('image/jpeg'); link.download = `struk-${transaction.id}.jpg`; link.click(); showToast("Gambar diunduh. Kirim manual ke WA Web."); } setIsGeneratingImage(false); setReceiptToPrint(null); }, 'image/jpeg', 0.9); } catch (error) { console.error("Image gen error:", error); showToast("Gagal membuat gambar", "error"); setIsGeneratingImage(false); setReceiptToPrint(null); } }, 500); };
 
             const handleSubmit = async (e) => {
                 if (e) e.preventDefault();
@@ -1610,31 +1309,32 @@
                 try {
                     const collectionRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory');
                     const newQty = safeNumber(formData.qty);
-                    
-                    const baseData = {
-                        name: formData.name,
-                        unit: formData.unit || 'Pcs',
-                        rack: formData.rack || '-',
-                        exp: formData.exp || '',
-                        price: safeNumber(formData.price),
-                        minStock: formData.minStock ? safeNumber(formData.minStock) : null,
-                        updatedAt: window.serverTimestamp()
-                    };
-
+                    const baseData = { name: formData.name, unit: formData.unit || 'Pcs', rack: formData.rack || '-', exp: formData.exp || '', price: safeNumber(formData.price), minStock: formData.minStock ? safeNumber(formData.minStock) : null, updatedAt: window.serverTimestamp() };
                     const stockUpdate = { [`stocks.${activeStoreId}`]: newQty };
-
                     if (editingItem) {
                         const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', editingItem.id);
                         await window.updateDoc(docRef, { ...baseData, ...stockUpdate }); 
+                        
+                        // LOG
+                        logToDB('STOK', `Update item ${formData.name} menjadi ${newQty} ${formData.unit}`, activeStoreId, user.email);
+
                         showToast(`Stok untuk ${currentProfile.name} diperbarui`);
                     } else {
                         const existingItem = rawInventory.find(i => i.name.toLowerCase() === formData.name.toLowerCase());
                         if (existingItem) {
                              const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', existingItem.id);
                              await window.updateDoc(docRef, { ...baseData, ...stockUpdate });
+                             
+                             // LOG
+                             logToDB('STOK', `Update stok item ${formData.name} (Existing) menjadi ${newQty} ${formData.unit}`, activeStoreId, user.email);
+                             
                              showToast(`Barang sudah ada. Stok ${currentProfile.name} diupdate.`);
                         } else {
                             await window.addDoc(collectionRef, { ...baseData, stocks: { [activeStoreId]: newQty }, qty: newQty, createdAt: window.serverTimestamp() }); 
+                            
+                            // LOG
+                            logToDB('STOK', `Tambah item baru ${formData.name} (${newQty} ${formData.unit})`, activeStoreId, user.email);
+
                             showToast("Barang baru ditambahkan");
                         }
                     }
@@ -1643,14 +1343,20 @@
             };
 
             const handleSaveSettings = async (newSettings) => { if(!user) return; setSubmitting(true); try { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'settings', 'global'); await window.setDoc(docRef, newSettings); showToast("Pengaturan disimpan"); } catch(error) { console.error(error); showToast("Gagal simpan pengaturan", "error"); } finally { setSubmitting(false); } };
-            const handleDelete = async () => { if (!deleteModal.item || !user) return; try { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', deleteModal.item.id); await window.deleteDoc(docRef); showToast("Barang dihapus (dari semua toko)"); } catch (error) { showToast("Gagal menghapus", "error"); } finally { setDeleteModal({ show: false, item: null }); } };
+            const handleDelete = async () => { if (!deleteModal.item || !user) return; try { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', deleteModal.item.id); await window.deleteDoc(docRef); 
+                // LOG
+                logToDB('HAPUS', `Hapus permanen item ${deleteModal.item.name}`, 'all_stores', user.email);
+                showToast("Barang dihapus (dari semua toko)"); 
+            } catch (error) { showToast("Gagal menghapus", "error"); } finally { setDeleteModal({ show: false, item: null }); } };
             const handleConfirmDeleteRack = async () => { if (!deleteRackModal.rackName || !user) return; const rackName = deleteRackModal.rackName; try { const batch = window.writeBatch(window.db); const itemsToUpdate = inventoryData.filter(item => item.rack && item.rack.includes(rackName)); if (itemsToUpdate.length === 0) { showToast("Tidak ada item di rak ini"); setDeleteRackModal({ show: false, rackName: null }); return; } itemsToUpdate.forEach(item => { const newRacks = item.rack.split(',').map(r => r.trim()).filter(r => r !== rackName); const newRackString = newRacks.length > 0 ? newRacks.join(', ') : '-'; const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id); batch.update(docRef, { rack: newRackString }); }); await batch.commit(); showToast(`Rak "${rackName}" berhasil dihapus`); setSelectedRacks([]); } catch (err) { console.error("Failed delete rack", err); showToast("Gagal menghapus rak", "error"); } finally { setDeleteRackModal({ show: false, rackName: null }); } };
             const handleNavClick = (tabId, event) => { setActiveTab(tabId); if (tabId !== 'list') setShowOnlyLowStock(false); setIsSidebarOpen(false); };
-            const menuItems = [ { id: 'cashier', label: 'Kasir', icon: 'cash-register' }, { id: 'history', label: 'Riwayat', icon: 'clock-rotate-left' }, { id: 'purchases', label: 'Faktur Pembelian', icon: 'file-invoice-dollar' }, { id: 'home', label: 'Dashboard', icon: 'chart-pie' }, { id: 'list', label: 'Stok Barang', icon: 'boxes-stacked' }, { id: 'add', label: 'Input Manual', icon: 'pen-to-square' }, { id: 'import', label: 'Import Masal', icon: 'file-import' }, { id: 'settings', label: 'Pengaturan', icon: 'gears' } ];
+            const menuItems = [ { id: 'cashier', label: 'Kasir', icon: 'cash-register' }, { id: 'history', label: 'Riwayat', icon: 'clock-rotate-left' }, { id: 'transfer', label: 'Transfer Stok', icon: 'arrow-right-arrow-left' }, { id: 'purchases', label: 'Faktur Pembelian', icon: 'file-invoice-dollar' }, { id: 'home', label: 'Dashboard', icon: 'chart-pie' }, { id: 'list', label: 'Stok Barang', icon: 'boxes-stacked' }, { id: 'add', label: 'Input Manual', icon: 'pen-to-square' }, { id: 'import', label: 'Import Masal', icon: 'file-import' }, { id: 'settings', label: 'Pengaturan', icon: 'gears' } ];
 
             return (
                 <div className={`min-h-screen flex flex-col md:flex-row bg-sky-50/50 transition-colors duration-500 ${activeStoreId === 'all_stores' ? 'theme-all-stores' : ''}`}>
                     <RamadhanDecor /> <Toast show={toast.show} message={toast.message} type={toast.type} /> {isSidebarOpen && (<div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm fade-in" onClick={() => setIsSidebarOpen(false)}></div>)}
+                    <NotificationCenter isOpen={showNotifications} onClose={() => setShowNotifications(false)} user={user} currentProfile={currentProfile} />
+                    
                     {receiptToPrint && ( <div style={{ position: 'fixed', top: '-9999px', left: '-9999px', zIndex: -1 }}> <div id="receipt-hidden-container" className="bg-white p-6 w-[380px] text-black font-mono shadow-none" style={{ fontFamily: '"Courier New", Courier, monospace' }}> <div className="text-center mb-4"> <h2 className="text-xl font-bold uppercase">{receiptToPrint.storeName || APP_NAME}</h2> <p className="text-sm text-gray-600"> {receiptToPrint.storeAddress || "Indonesia"} </p> {(receiptToPrint.headers || []).map((h, i) => <p key={i} className="text-sm text-gray-600">{h}</p>)} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between text-xs mb-1"> <span>Tgl: {new Date(receiptToPrint.date.seconds ? receiptToPrint.date.toDate() : receiptToPrint.date).toLocaleString('id-ID')}</span> </div> <div className="flex justify-between text-xs mb-2"> <span>Ref: {receiptToPrint.id ? receiptToPrint.id.slice(-8).toUpperCase() : '-'}</span> <span>Kasir: {receiptToPrint.cashierName || 'Admin'}</span> </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="space-y-2 mb-4"> {receiptToPrint.items.map((item, idx) => { const validQty = item.cartQty - (item.returnedQty || 0); if (validQty <= 0) return null; return ( <div key={idx} className="text-sm"> <div className="font-bold">{item.name}</div> <div className="flex justify-between"> <span>{validQty} x {formatRupiah(item.price)}</span> <span>{formatRupiah(validQty * item.price)}</span> </div> </div> ); })} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between font-bold text-lg mb-1"> <span>TOTAL</span> <span>{formatRupiah(receiptToPrint.items.reduce((acc, item) => acc + (item.price * (item.cartQty - (item.returnedQty || 0))), 0))}</span> </div> {receiptToPrint.pay !== undefined && ( <div className="flex justify-between text-sm"> <span>Tunai</span> <span>{formatRupiah(receiptToPrint.pay)}</span> </div> )} {receiptToPrint.change !== undefined && ( <div className="flex justify-between text-sm"> <span>Kembali</span> <span>{formatRupiah(receiptToPrint.change)}</span> </div> )} <div className="border-b-2 border-dashed border-gray-300 my-4"></div> <div className="text-center text-xs text-gray-500 whitespace-pre-wrap"> {receiptToPrint.footer || "Terima Kasih\nBarang tidak dapat ditukar"} </div> {receiptToPrint.status === 'returned' && <div className="mt-4 text-center font-bold text-xl text-red-600 border-2 border-red-600 p-2 transform -rotate-12">TRANSAKSI DIBATALKAN</div>} {receiptToPrint.status === 'partial' && <div className="mt-4 text-center font-bold text-sm text-amber-600">*** ADA RETUR SEBAGIAN ***</div>} </div> </div> )}
 
                     <aside className={`fixed top-0 left-0 h-full z-50 w-72 md:w-80 bg-white/95 backdrop-blur-xl md:backdrop-blur-md border-r border-slate-200 md:border-white/20 shadow-2xl md:shadow-soft transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -1686,13 +1392,36 @@
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.0 (Multi Struk)</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.5 (Excel Export)</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
-                        <div className="md:hidden mb-6 flex items-center justify-between gap-4 relative z-30"><div className="flex items-center gap-2"><div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white ${activeStoreId === 'all_stores' ? 'bg-indigo-600' : 'bg-sky-600'} shadow-md`}><Icon name="shop" /></div><h1 className="font-bold text-slate-800 text-lg">{currentProfile.name}</h1></div><button onClick={() => setIsSidebarOpen(true)} className="bg-white/90 backdrop-blur-md px-4 py-2.5 rounded-xl text-slate-700 font-bold text-sm shadow-sm border border-slate-200 active:scale-95 transition-all flex items-center gap-2"><Icon name="bars" className="text-sky-600" /> Menu</button></div>
+                        {/* Mobile Header Updated with Notification Bell */}
+                        <div className="md:hidden mb-6 flex items-center justify-between gap-4 relative z-30">
+                            <div className="flex items-center gap-2">
+                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white ${activeStoreId === 'all_stores' ? 'bg-indigo-600' : 'bg-sky-600'} shadow-md`}><Icon name="shop" /></div>
+                                <h1 className="font-bold text-slate-800 text-lg">{currentProfile.name}</h1>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setShowNotifications(true)} className="w-10 h-10 bg-white/90 backdrop-blur-md rounded-xl text-slate-600 font-bold shadow-sm border border-slate-200 active:scale-95 transition-all flex items-center justify-center">
+                                    <Icon name="bell" className="text-sky-600" />
+                                </button>
+                                <button onClick={() => setIsSidebarOpen(true)} className="bg-white/90 backdrop-blur-md px-4 py-2.5 rounded-xl text-slate-700 font-bold text-sm shadow-sm border border-slate-200 active:scale-95 transition-all flex items-center gap-2">
+                                    <Icon name="bars" className="text-sky-600" /> Menu
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Desktop Header Notification Bell */}
+                        <div className="hidden md:flex justify-end mb-4">
+                             <button onClick={() => setShowNotifications(true)} className="bg-white px-4 py-2 rounded-xl text-slate-600 font-bold text-sm shadow-sm border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+                                <Icon name="bell" className="text-sky-600" /> Aktivitas
+                            </button>
+                        </div>
+
                         {activeTab === 'home' && (<DashboardView items={inventoryData} settings={settingsData} onShowLowStock={() => { setActiveTab('list'); setShowOnlyLowStock(true); }} />)}
                         {activeTab === 'cashier' && (<CashierView items={inventoryData} user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} />)}
+                        {activeTab === 'transfer' && (<TransferView items={rawInventory} settings={settingsData} showToast={showToast} currentProfile={currentProfile} user={user} />)}
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} />)}
                         {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} />)}
