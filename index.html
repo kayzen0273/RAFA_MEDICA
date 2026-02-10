@@ -943,7 +943,27 @@
             const fuse = useMemo(() => new Fuse(items, { keys: ['name'], threshold: 0.3 }), [items]);
             const filteredItems = useMemo(() => { if (!search) return []; return fuse.search(search).map(r => r.item).slice(0, 30); }, [items, search, fuse]);
             const getStockInSource = (item) => { if (!item.stocks) return item.qty || 0; return item.stocks[sourceStoreId] || 0; };
-            const addToTransfer = (item) => { const currentStock = getStockInSource(item); if (currentStock <= 0) { showToast("Stok habis di toko asal!", "error"); return; } setCart(prev => { const existing = prev.find(c => c.id === item.id); if (existing) { if (existing.transferQty >= currentStock) { showToast("Melebihi stok tersedia!", "error"); return prev; } return prev.map(c => c.id === item.id ? { ...c, transferQty: c.transferQty + 1 } : c); } return [...prev, { ...item, transferQty: 1 }]; }); };
+            const addToTransfer = (item) => { 
+                const currentStock = getStockInSource(item); 
+                if (currentStock <= 0) { 
+                    showToast("Stok habis di toko asal!", "error"); 
+                    return; 
+                } 
+                setCart(prev => { 
+                    const existing = prev.find(c => c.id === item.id); 
+                    if (existing) { 
+                        if (existing.transferQty >= currentStock) { 
+                            showToast("Melebihi stok tersedia!", "error"); 
+                            return prev; 
+                        } 
+                        return prev.map(c => c.id === item.id ? { ...c, transferQty: c.transferQty + 1 } : c); 
+                    } 
+                    return [...prev, { ...item, transferQty: 1 }]; 
+                });
+                
+                // --- FIX: CLEAR SEARCH AFTER ADDING ITEM ---
+                setSearch(''); 
+            };
             const updateQty = (id, delta) => { setCart(prev => prev.map(c => { if (c.id === id) { const newQty = c.transferQty + delta; const maxStock = getStockInSource(items.find(i => i.id === id)); if (newQty > maxStock) { showToast("Stok mentok!", "error"); return c; } if (newQty < 1) return c; return { ...c, transferQty: newQty }; } return c; })); };
             const removeFromCart = (id) => setCart(prev => prev.filter(c => c.id !== id));
             const handleTransfer = async () => { if (!sourceStoreId || !destStoreId) { showToast("Pilih toko asal dan tujuan", "error"); return; } if (sourceStoreId === destStoreId) { showToast("Toko asal dan tujuan tidak boleh sama", "error"); return; } if (cart.length === 0) return; setIsProcessing(true); try { const batch = window.writeBatch(window.db); cart.forEach(item => { const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id); const sourceField = `stocks.${sourceStoreId}`; const destField = `stocks.${destStoreId}`; batch.update(docRef, { [sourceField]: window.increment(-item.transferQty), [destField]: window.increment(item.transferQty), updatedAt: window.serverTimestamp() }); }); await batch.commit(); 
@@ -1872,7 +1892,7 @@
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} />)}
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} />)}
-                        {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} />)}
+                        {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} />)}
                         {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', minStock: ''}); setActiveTab('list'); }} currentProfile={currentProfile} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} settings={settingsData} />)}
                         {activeTab === 'settings' && (<SettingsView settings={settingsData} onSave={handleSaveSettings} loading={submitting} />)}
