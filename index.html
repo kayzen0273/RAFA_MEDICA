@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V25.12 - Rekap WA + Pengeluaran)</title>
+    <title>Sistem Kasir Rafa Medica (V25.12 - Buku Kas Update)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -673,13 +673,14 @@
             );
         };
 
-        // --- NEW CASH BOOK COMPONENT (MODIFIED FOR REVENUE SEPARATION & COPY WA & EXPENSE FEATURE) ---
+        // --- NEW CASH BOOK COMPONENT (WITH EXPENSE & WHATSAPP) ---
         const CashBookView = ({ user, currentProfile, showToast }) => {
             const [viewMode, setViewMode] = useState('operational'); // 'operational' | 'revenue'
-            
-            // OPERATIONAL STATE
             const [entries, setEntries] = useState([]);
+            const [revenueLogs, setRevenueLogs] = useState([]);
             const [loading, setLoading] = useState(true);
+            
+            // Operational Form State
             const [showModal, setShowModal] = useState(false);
             const [submitting, setSubmitting] = useState(false);
             const [formType, setFormType] = useState('in');
@@ -687,45 +688,38 @@
             const [formDesc, setFormDesc] = useState('');
             const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
 
-            // REVENUE STATE
-            const [revenueLogs, setRevenueLogs] = useState([]);
+            // Revenue Form State
             const [revForm, setRevForm] = useState({ date: new Date().toISOString().slice(0, 10), total: '', deposited: '', prevBalance: 0, expenseAmount: '', expenseNote: '' });
             const [isRevSubmitting, setIsRevSubmitting] = useState(false);
 
             useEffect(() => {
                 if (!user) return;
                 
-                // 1. Fetch Operational Cashflow
+                // Operational Data
                 const qOp = window.query(
                     window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow'),
                     window.orderBy('date', 'desc'),
-                    window.limit(300)
+                    window.limit(100)
                 );
                 const unsubOp = window.onSnapshot(qOp, (snapshot) => {
                     const allData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    const storeData = currentProfile.id === 'all_stores' 
-                        ? allData 
-                        : allData.filter(d => d.storeId === currentProfile.id);
+                    const storeData = currentProfile.id === 'all_stores' ? allData : allData.filter(d => d.storeId === currentProfile.id);
                     setEntries(storeData);
                     setLoading(false);
                 });
 
-                // 2. Fetch Revenue Logs
+                // Revenue Data
                 const qRev = window.query(
                     window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'),
                     window.orderBy('date', 'desc'),
-                    window.limit(100)
+                    window.limit(50)
                 );
                 const unsubRev = window.onSnapshot(qRev, (snapshot) => {
                     const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    const storeLogs = currentProfile.id === 'all_stores' 
-                        ? allLogs 
-                        : allLogs.filter(d => d.storeId === currentProfile.id);
+                    const storeLogs = currentProfile.id === 'all_stores' ? allLogs : allLogs.filter(d => d.storeId === currentProfile.id);
                     setRevenueLogs(storeLogs);
 
-                    // Auto-fill previous balance for new entry form based on LAST entry
                     if (storeLogs.length > 0) {
-                        // Find the most recent entry that is NOT today (for prev balance)
                         const today = new Date().toISOString().slice(0, 10);
                         const lastEntry = storeLogs.find(l => l.date < today);
                         if (lastEntry) {
@@ -737,7 +731,6 @@
                 return () => { unsubOp(); unsubRev(); };
             }, [user, currentProfile]);
 
-            // Calculate Operational Stats
             const opStats = useMemo(() => {
                 let totalIn = 0, totalOut = 0;
                 entries.forEach(e => {
@@ -747,7 +740,6 @@
                 return { totalIn, totalOut, balance: totalIn - totalOut };
             }, [entries]);
 
-            // Handlers for Operational
             const handleOpSubmit = async (e) => {
                 e.preventDefault();
                 if (!formAmount || !formDesc || !formDate) return;
@@ -761,7 +753,7 @@
                     logToDB('KEUANGAN', `Catat ${formType === 'in' ? 'Masuk' : 'Keluar'}: ${formDesc} (${formatRupiah(formAmount)})`, currentProfile.id, user.email);
                     showToast("Transaksi berhasil disimpan");
                     setFormAmount(''); setFormDesc(''); setShowModal(false);
-                } catch (err) { console.error(err); showToast("Gagal menyimpan data", "error"); } finally { setSubmitting(false); }
+                } catch (err) { showToast("Gagal menyimpan data", "error"); } finally { setSubmitting(false); }
             };
 
             const handleOpDelete = async (id) => {
@@ -769,7 +761,6 @@
                 try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow', id)); showToast("Transaksi dihapus"); } catch(err) { showToast("Gagal menghapus", "error"); }
             };
 
-            // Handlers for Revenue
             const handleRevSubmit = async (e) => {
                 e.preventDefault();
                 if(!revForm.total || !revForm.date) return;
@@ -780,32 +771,28 @@
                 const prev = safeNumber(revForm.prevBalance);
                 const expense = safeNumber(revForm.expenseAmount);
                 const expenseNote = revForm.expenseNote || '';
-                
-                // CALCULATION UPDATE WITH EXPENSE
                 const remaining = (prev + total) - expense - deposited;
 
                 try {
-                    // Check if entry exists for this date
                     const existing = revenueLogs.find(l => l.date === revForm.date);
+                    const data = {
+                        date: revForm.date,
+                        storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                        totalRevenue: total, deposited, remaining, previousBalance: prev,
+                        expenseAmount: expense, expenseNote: expenseNote,
+                        user: user.email, updatedAt: window.serverTimestamp()
+                    };
+
                     if (existing) {
-                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', existing.id), {
-                            totalRevenue: total, deposited, remaining, previousBalance: prev, 
-                            expenseAmount: expense, expenseNote: expenseNote,
-                            updatedAt: window.serverTimestamp()
-                        });
+                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', existing.id), data);
                         showToast("Data setoran diperbarui");
                     } else {
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'), {
-                            date: revForm.date,
-                            storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                            totalRevenue: total, deposited, remaining, previousBalance: prev,
-                            expenseAmount: expense, expenseNote: expenseNote,
-                            user: user.email, createdAt: window.serverTimestamp()
-                        });
+                        data.createdAt = window.serverTimestamp();
+                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'), data);
                         showToast("Data setoran disimpan");
                     }
-                    setRevForm(prev => ({ ...prev, total: '', deposited: '', expenseAmount: '', expenseNote: '' })); // Keep date and prevBalance
-                } catch(err) { console.error(err); showToast("Gagal simpan setoran", "error"); } finally { setIsRevSubmitting(false); }
+                    setRevForm(prev => ({ ...prev, total: '', deposited: '', expenseAmount: '', expenseNote: '' }));
+                } catch(err) { showToast("Gagal simpan setoran", "error"); } finally { setIsRevSubmitting(false); }
             };
 
             const handleRevDelete = async (id) => {
@@ -813,53 +800,34 @@
                 try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', id)); showToast("Dihapus"); } catch(err) { showToast("Gagal hapus", "error"); }
             };
 
-            // --- COPY REVENUE REPORT TO WHATSAPP (UPDATED WITH EXPENSE) ---
             const handleCopyRevenueToWA = (log) => {
                 const prev = safeNumber(log.previousBalance);
                 const income = safeNumber(log.totalRevenue);
                 const exp = safeNumber(log.expenseAmount);
                 const expNote = log.expenseNote ? `(${log.expenseNote})` : '';
-                
                 const totalMoney = (prev + income) - exp;
 
                 const text = `*LAPORAN SETORAN HARIAN*
 📍 Cabang: ${currentProfile.name}
 📅 Tanggal: ${formatDateIndo(log.date)}
 
-💵 Sisa Kemarin: ${formatRupiah(prev)}
-💰 Pendapatan: ${formatRupiah(income)}
-${exp > 0 ? `💸 Pengeluaran: -${formatRupiah(exp)} ${expNote}` : ''}
+💰 Sisa Kemarin: ${formatRupiah(prev)}
+💵 Pendapatan: ${formatRupiah(income)}
+${exp > 0 ? `🔻 Pengeluaran: -${formatRupiah(exp)} ${expNote}` : ''}
 ---------------------------
 Sisa Uang Bersih: ${formatRupiah(totalMoney)}
 
 🏦 *DISETOR: ${formatRupiah(log.deposited)}*
 
-📦 *SISA DI LACI: ${formatRupiah(log.remaining)}*`;
-
-                const fallbackCopy = (text) => { 
-                    const textArea = document.createElement("textarea"); 
-                    textArea.value = text; 
-                    textArea.style.position = "fixed"; 
-                    textArea.style.left = "-9999px"; 
-                    document.body.appendChild(textArea); 
-                    textArea.select(); 
-                    try { 
-                        document.execCommand('copy'); 
-                        showToast("Laporan disalin! Tempel di WA."); 
-                    } catch (err) { 
-                        showToast("Gagal menyalin", "error");
-                    } 
-                    document.body.removeChild(textArea); 
-                };
+📫 *SISA DI LACI: ${formatRupiah(log.remaining)}*`;
 
                 if (navigator.clipboard && window.isSecureContext) {
-                    navigator.clipboard.writeText(text).then(() => showToast("Laporan disalin! Tempel di WA.")).catch(() => fallbackCopy(text));
+                    navigator.clipboard.writeText(text).then(() => showToast("Disalin! Tempel di WA.")).catch(() => alert("Gagal copy otomatis."));
                 } else {
-                    fallbackCopy(text);
+                    const textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; textArea.style.left = "-9999px"; document.body.appendChild(textArea); textArea.select(); try { const successful = document.execCommand('copy'); if(successful) showToast("Disalin! Tempel di WA."); } catch (err) {} document.body.removeChild(textArea);
                 }
             };
 
-            // Calculated value for display in revenue form
             const currentRevRemaining = (safeNumber(revForm.prevBalance) + safeNumber(revForm.total)) - safeNumber(revForm.expenseAmount) - safeNumber(revForm.deposited);
 
             if (currentProfile.id === 'all_stores') {
@@ -890,11 +858,11 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                     </div>
 
                     {/* TABS */}
-                    <div className="flex p-1 bg-slate-200 rounded-xl mb-6">
-                        <button onClick={() => setViewMode('operational')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'operational' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                            Operasional (Harian)
+                    <div className="flex p-1 bg-white rounded-xl mb-6 shadow-sm border border-slate-100">
+                        <button onClick={() => setViewMode('operational')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'operational' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
+                            Operasional Harian
                         </button>
-                        <button onClick={() => setViewMode('revenue')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${viewMode === 'revenue' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        <button onClick={() => setViewMode('revenue')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'revenue' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
                             Rekap Setoran
                         </button>
                     </div>
@@ -916,7 +884,7 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                             <div className="space-y-3 pb-20">
                                 <div className="flex justify-between items-end px-1"><h3 className="font-bold text-slate-700 text-sm">Riwayat Operasional</h3></div>
                                 {entries.length === 0 ? (
-                                    <div className="text-center py-10 opacity-60"><Icon name="receipt" className="text-3xl text-slate-300 mb-2" /><p className="text-xs">Belum ada catatan.</p></div>
+                                    <div className="text-center py-10 opacity-60"><Icon name="receipt" className="text-3xl text-slate-300 mb-2" /><p className="text-xs text-slate-500">Belum ada catatan.</p></div>
                                 ) : (
                                     entries.map(t => (
                                         <div key={t.id} className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center group">
@@ -926,7 +894,7 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                             </div>
                                             <div className="text-right">
                                                 <p className={`font-bold text-sm ${t.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'in' ? '+' : '-'} {formatRupiah(t.amount)}</p>
-                                                <button onClick={() => handleOpDelete(t.id)} className="text-slate-300 hover:text-red-500 text-[10px]"><Icon name="trash" /></button>
+                                                <button onClick={() => handleOpDelete(t.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1"><Icon name="trash" /></button>
                                             </div>
                                         </div>
                                     ))
@@ -988,7 +956,7 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                             <div className="space-y-3">
                                 <h3 className="font-bold text-slate-700 text-sm px-1">Riwayat Setoran</h3>
                                 {revenueLogs.length === 0 ? (
-                                    <div className="text-center py-8 opacity-60"><Icon name="file-invoice" className="text-3xl text-slate-300 mb-2" /><p className="text-xs">Belum ada data setoran.</p></div>
+                                    <div className="text-center py-8 opacity-60"><Icon name="file-invoice" className="text-3xl text-slate-300 mb-2" /><p className="text-xs text-slate-500">Belum ada data setoran.</p></div>
                                 ) : (
                                     revenueLogs.map(log => (
                                         <div key={log.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative group">
@@ -1003,7 +971,6 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                                 <div><p className="text-slate-400 font-medium">Sisa Kemarin</p><p className="font-bold text-slate-600">{formatRupiah(log.previousBalance)}</p></div>
                                                 <div className="text-right"><p className="text-slate-400 font-medium">Pendapatan</p><p className="font-bold text-slate-800">{formatRupiah(log.totalRevenue)}</p></div>
                                                 
-                                                {/* DISPLAY EXPENSE IN LIST */}
                                                 {safeNumber(log.expenseAmount) > 0 && (
                                                     <div className="col-span-2 bg-red-50 p-1.5 rounded flex justify-between items-center my-1">
                                                         <span className="text-[10px] text-red-600 font-bold">Pengeluaran ({log.expenseNote || '-'})</span>
@@ -1473,6 +1440,194 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
             );
         };
 
+        const ListView = ({ items, searchQuery, setSearchQuery, onEdit, onDelete, onDeleteRack, showOnlyLowStock, setShowOnlyLowStock, selectedRacks, setSelectedRacks, uniqueRacksData, onCopySuccess, loading, settings, currentProfile }) => {
+            const [isRackDropdownOpen, setIsRackDropdownOpen] = useState(false);
+            const [rackSearch, setRackSearch] = useState('');
+            const dropdownRef = useRef(null);
+            
+            const ITEMS_PER_PAGE = 20;
+            const [displayedLimit, setDisplayedLimit] = useState(ITEMS_PER_PAGE);
+            const loaderRef = useRef(null);
+            const lowStockThreshold = settings.lowStockThreshold || DEFAULT_SETTINGS.lowStockThreshold;
+
+            useEffect(() => {
+                const handleClickOutside = (event) => { if (dropdownRef.current && !dropdownRef.current.contains(event.target)) { setIsRackDropdownOpen(false); } };
+                document.addEventListener("mousedown", handleClickOutside); return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, []);
+
+            const fuse = useMemo(() => new Fuse(items, { keys: ['name'], threshold: 0.3, ignoreLocation: true, minMatchCharLength: 2, }), [items]);
+
+            const filteredItems = useMemo(() => {
+                let result = items;
+                if (searchQuery) { result = fuse.search(searchQuery).map(({ item }) => item); }
+                return result.filter(i => {
+                    const threshold = i.minStock ? safeNumber(i.minStock) : lowStockThreshold;
+                    const matchesLowStock = showOnlyLowStock ? safeNumber(i.qty) < threshold : true;
+                    let matchesRack = true;
+                    if (selectedRacks.length > 0) { const itemRackLower = (i.rack || '-').toLowerCase(); matchesRack = selectedRacks.some(selected => itemRackLower.includes(selected.toLowerCase())); }
+                    return matchesLowStock && matchesRack;
+                });
+            }, [items, searchQuery, showOnlyLowStock, selectedRacks, fuse, lowStockThreshold]);
+
+            useEffect(() => { setDisplayedLimit(ITEMS_PER_PAGE); }, [searchQuery, showOnlyLowStock, selectedRacks]);
+
+            useEffect(() => {
+                const observer = new IntersectionObserver((entries) => { const target = entries[0]; if (target.isIntersecting && displayedLimit < filteredItems.length) { setDisplayedLimit(prev => Math.min(prev + ITEMS_PER_PAGE, filteredItems.length + ITEMS_PER_PAGE)); } }, { root: null, rootMargin: "100px", threshold: 0.1 });
+                if (loaderRef.current) observer.observe(loaderRef.current); return () => { if (loaderRef.current) observer.unobserve(loaderRef.current); }
+            }, [filteredItems.length, displayedLimit]);
+
+            // --- EXPORT EXCEL FUNCTION (UPDATED FOR BOLD HEADERS & CENTERED STOCKS) ---
+            const handleExportExcel = () => {
+                if (currentProfile.id !== 'all_stores') return;
+                
+                const profiles = settings.storeProfiles || [];
+                
+                // Construct HTML for Excel
+                // Using a simple HTML table allows for formatting like BOLD headers
+                let html = `
+                    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                    <head>
+                        <!--[if gte mso 9]>
+                        <xml>
+                            <x:ExcelWorkbook>
+                                <x:ExcelWorksheets>
+                                    <x:ExcelWorksheet>
+                                        <x:Name>Stok Gabungan</x:Name>
+                                        <x:WorksheetOptions>
+                                            <x:DisplayGridlines/>
+                                        </x:WorksheetOptions>
+                                    </x:ExcelWorksheet>
+                                </x:ExcelWorksheets>
+                            </x:ExcelWorkbook>
+                        </xml>
+                        <![endif]-->
+                        <style>
+                            th { font-weight: bold; background-color: #f0f0f0; border: 1px solid #000; padding: 5px; }
+                            td { border: 1px solid #ccc; padding: 5px; }
+                        </style>
+                    </head>
+                    <body>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="text-align: left;">Nama Barang</th>
+                                    <th style="text-align: center;">Stok (Total Gabungan)</th>
+                                    ${profiles.map(p => `<th style="text-align: center;">${p.name}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                // Data Rows
+                filteredItems.forEach(item => {
+                    let total = 0;
+                    const perStore = profiles.map(p => {
+                        const qty = (item.stocks && item.stocks[p.id]) ? item.stocks[p.id] : 0;
+                        total += qty;
+                        return qty;
+                    });
+                    
+                    // Note: item.qty is already the total in 'all_stores' mode
+                    
+                    html += `
+                        <tr>
+                            <td style="text-align: left;">${item.name}</td>
+                            <td style="text-align: center;">${total}</td>
+                            ${perStore.map(val => `<td style="text-align: center;">${val}</td>`).join('')}
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+                    </body>
+                    </html>
+                `;
+
+                // Download
+                const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.setAttribute("download", `Stok_Gabungan_${new Date().toLocaleDateString('id-ID').replace(/\//g, '-')}.xls`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                onCopySuccess("File Excel berhasil diunduh (Header Bold & Center)!");
+            };
+
+            const handleCopyToWA = () => {
+                const now = new Date(); const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getFullYear()).slice(-2)}`;
+                let title = `${currentProfile.name}`; if (showOnlyLowStock) title += " (MENIPIS)";
+                if (filteredItems.length === 0) { alert("Tidak ada data!"); return; }
+                let text = `*[Stok ${title}]*\n*🗓️${dateStr}*\n------------------\n\n`;
+                const processItems = (itemList) => {
+                    const itemsByRack = {};
+                    itemList.forEach(item => { let rackName = item.rack && item.rack.trim() !== '-' && item.rack.trim() !== '' ? item.rack.trim() : 'NO RACK'; let rackKey = rackName.toUpperCase(); if (!itemsByRack[rackKey]) { itemsByRack[rackKey] = { name: rackName, items: [] }; } itemsByRack[rackKey].items.push(item); });
+                    let content = "";
+                    Object.keys(itemsByRack).sort().forEach(key => { const group = itemsByRack[key]; content += `*${group.name}*\n`; group.items.forEach((item, idx) => { content += `${idx+1}. ${item.name} (${item.qty} ${item.unit})\n`; }); content += `\n`; });
+                    return content;
+                };
+                text += processItems(filteredItems); text = text.trimEnd() + `\n\nTotal Item: ${filteredItems.length}`;
+                if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => onCopySuccess("Disalin! Tempel di WA.")).catch(() => fallbackCopy(text)); } else { fallbackCopy(text); }
+            };
+
+            const fallbackCopy = (text) => { const textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; textArea.style.left = "-9999px"; document.body.appendChild(textArea); textArea.select(); try { const successful = document.execCommand('copy'); if(successful) onCopySuccess("Disalin! Tempel di WA."); } catch (err) {} document.body.removeChild(textArea); };
+            const debouncedSetSearchQuery = useMemo(() => { let timer; return (val) => { clearTimeout(timer); timer = setTimeout(() => setSearchQuery(val), 300); }; }, []);
+            const toggleRack = (rackName) => { setSelectedRacks(prev => { if (prev.includes(rackName)) return prev.filter(r => r !== rackName); return [...prev, rackName]; }); };
+            const getRackLabel = () => { if (selectedRacks.length === 0) return "Semua Rak"; if (selectedRacks.length === 1) return selectedRacks[0]; return `${selectedRacks.length} Rak Terpilih`; };
+            const filteredRacks = uniqueRacksData.filter(r => r.name.toLowerCase().includes(rackSearch.toLowerCase()));
+            const displayedItems = filteredItems.slice(0, displayedLimit);
+
+            return (
+                <div className="space-y-4 fade-in h-full flex flex-col relative z-10">
+                    <header className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                        <div>
+                            <h2 className="text-2xl font-extrabold text-slate-800 tracking-tight drop-shadow-sm">{showOnlyLowStock ? '⚠️ Stok Menipis' : 'Daftar Barang'}</h2>
+                            <p className="text-slate-500 text-xs mt-1">Stok: <b>{currentProfile.name}</b> • Total: {filteredItems.length}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 items-end">
+                            {currentProfile.id === 'all_stores' && (
+                                <button onClick={handleExportExcel} className="py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all bg-emerald-600 hover:bg-emerald-700 text-white shadow-md active:scale-95">
+                                    <Icon name="file-excel" /> Export Excel
+                                </button>
+                            )}
+                            <button onClick={handleCopyToWA} className="py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all bg-[#25D366] hover:bg-[#128C7E] text-white shadow-md active:scale-95"><Icon name="whatsapp" type="brands" className="text-sm" /> Salin WA</button>
+                            <button onClick={() => setShowOnlyLowStock(!showOnlyLowStock)} className={`py-2 px-3 rounded-lg font-bold text-[10px] flex items-center gap-2 transition-all border min-w-[90px] ${showOnlyLowStock ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}><Icon name="filter" /> {showOnlyLowStock ? 'Reset Low' : 'Filter Low'}</button>
+                            <div className="relative min-w-[140px] md:min-w-[160px]" ref={dropdownRef}>
+                                <button onClick={() => setIsRackDropdownOpen(!isRackDropdownOpen)} className={`w-full py-2.5 px-3 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-700 shadow-sm flex items-center justify-between transition-all ${isRackDropdownOpen ? 'ring-1 ring-sky-500' : ''}`}><span className="truncate max-w-[100px]">{getRackLabel()}</span><Icon name="chevron-down" className={`text-xs text-slate-400 ml-2 transition-transform ${isRackDropdownOpen ? 'rotate-180' : ''}`} /></button>
+                                {isRackDropdownOpen && (<div className="absolute top-full right-0 mt-2 w-[280px] md:w-72 bg-white rounded-xl shadow-2xl border border-slate-100 z-[60] overflow-hidden fade-in origin-top-right"><div className="p-3 border-b border-slate-50 sticky top-0 bg-white z-10"><div className="relative mb-2"><input autoFocus type="text" placeholder="Cari rak..." className="w-full pl-8 pr-8 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-sky-100 focus:border-sky-400 outline-none transition-all" value={rackSearch} onChange={(e) => setRackSearch(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400" />{rackSearch && (<button onClick={() => setRackSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"><Icon name="xmark" className="text-[10px]" /></button>)}</div><button onClick={() => setSelectedRacks([])} className="w-full py-1.5 text-[10px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors">Reset (Tampilkan Semua)</button></div><div className="max-h-[240px] overflow-y-auto custom-scrollbar p-1.5 space-y-0.5">{filteredRacks.map(rack => { const isSelected = selectedRacks.includes(rack.name); return (<div key={rack.name} onClick={() => toggleRack(rack.name)} className={`group w-full text-left px-3 py-2.5 rounded-lg text-xs font-medium hover:bg-slate-50 transition-colors flex items-center justify-between cursor-pointer ${isSelected ? 'bg-sky-50/60' : ''}`}><div className="flex items-center gap-3 truncate flex-1"><div className="relative w-4 h-4 flex-shrink-0"><input type="checkbox" checked={isSelected} readOnly className="peer appearance-none w-4 h-4 border-2 border-slate-300 rounded checked:bg-sky-500 checked:border-sky-500 transition-all cursor-pointer" /><Icon name="check" className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" /></div><span className="truncate flex-1">{rack.name}</span></div><div className="flex items-center gap-2">{rack.hasNew && (<span className="flex-shrink-0 bg-rose-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-sm animate-pulse">NEW</span>)}<button onClick={(e) => { e.stopPropagation(); onDeleteRack(rack.name); }} className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100" title="Hapus Rak"><Icon name="trash-can" /></button></div></div>); })}{filteredRacks.length === 0 && (<div className="flex flex-col items-center justify-center py-6 text-slate-400"><Icon name="box-open" className="text-xl mb-1 opacity-50" /><p className="text-[10px]">Rak tidak ditemukan</p></div>)}</div></div>)}
+                            </div>
+                            {selectedRacks.length > 0 && (<button onClick={() => setSelectedRacks([])} className="py-2 px-2.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200">Reset</button>)}
+                        </div>
+                    </header>
+                    <div className="relative group z-10"><input type="text" placeholder="Cari nama barang..." className="w-full pl-9 pr-3 py-3 rounded-xl border-0 bg-white/90 backdrop-blur-sm shadow-soft ring-1 ring-slate-100 outline-none transition-all placeholder:text-slate-400 font-medium text-sm focus:ring-2 focus:ring-sky-500" defaultValue={searchQuery} onChange={e => debouncedSetSearchQuery(e.target.value)} /><Icon name="magnifying-glass" className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm transition-colors group-focus-within:text-slate-600" /></div>
+                    <div className="flex-1 overflow-y-auto pb-32 pr-1 custom-scrollbar">
+                        {loading ? (<div className="flex flex-col items-center justify-center py-20"><div className="typing-dot bg-sky-500"></div><p className="text-xs text-slate-400 mt-2">Menghubungkan Database...</p></div>) : filteredItems.length === 0 ? (<div className="flex flex-col items-center justify-center py-20 opacity-40"><div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3"><Icon name="box-open" className="text-2xl text-slate-400" /></div><p className="font-semibold text-slate-500 text-center text-sm">Tidak ada data</p></div>) : (<><div className="space-y-2">{displayedItems.map((item, index) => { const threshold = item.minStock ? safeNumber(item.minStock) : lowStockThreshold; const isLow = safeNumber(item.qty) < threshold; const isNew = isNewItem(item.createdAt); const animDelay = `${index * 50}ms`; const nameClass = searchQuery ? "type-effect-wrapper" : ""; const daysLeft = getDaysRemaining(item.exp); const isExpired = daysLeft !== null && daysLeft < 0; const isNearExp = daysLeft !== null && daysLeft < 90 && !isExpired; const expColor = isExpired ? 'text-red-600' : (isNearExp ? 'text-amber-600' : 'text-slate-400'); const expIcon = isExpired ? 'triangle-exclamation' : 'calendar-days'; return (<div key={item.id + searchQuery} style={{ animationDelay: animDelay }} className={`slide-up bg-white/90 backdrop-blur-sm rounded-xl p-3 border shadow-sm transition-all card-hover group flex items-center justify-between gap-3 ${isLow ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100 hover:border-slate-300'}`}><div className="flex items-center gap-3 flex-1 min-w-0"><div className={`w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center text-sm shadow-sm ${isLow ? 'bg-amber-100 text-amber-600' : 'bg-sky-50 text-sky-600'}`}><Icon name={isLow ? 'triangle-exclamation' : 'pills'} /></div><div className="min-w-0"><div className="flex items-start gap-2"><h4 className={`font-bold text-slate-800 text-xs leading-snug whitespace-normal break-words ${nameClass}`}>{item.name}</h4>{isNew && <span className="bg-rose-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-sm animate-pulse shadow-sm flex-shrink-0 mt-0.5">NEW</span>}</div><div className="mt-1 flex flex-col gap-0.5"><span className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-400"><Icon name="location-dot" className="text-[8px]" /> {item.rack || '-'}</span>{item.exp && (<span className={`inline-flex items-center gap-1 text-[9px] font-bold ${expColor}`}><Icon name={expIcon} className="text-[8px]" /> {formatDateIndo(item.exp)}</span>)}
+                            {currentProfile.id === 'all_stores' && item._breakdown && item._breakdown.length > 0 && (
+                                <div className="mt-2 flex flex-col gap-1 w-full">
+                                    {item._breakdown.map((info, idx) => {
+                                        const separatorIndex = info.lastIndexOf(':');
+                                        const storeName = info.substring(0, separatorIndex).trim();
+                                        const storeQty = info.substring(separatorIndex + 1).trim();
+                                        const isZero = parseInt(storeQty) === 0;
+
+                                        return (
+                                            <div key={idx} className="flex justify-between items-center text-[10px] bg-slate-50 border border-slate-200 px-2 py-1 rounded">
+                                                <span className="text-slate-500 font-medium mr-2 text-left">{storeName}</span>
+                                                <span className={`font-bold px-1.5 rounded border ${isZero ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white text-slate-800 border-slate-100'}`}>{storeQty}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div></div></div><div className="flex items-center gap-4 md:gap-8 flex-shrink-0"><div className="text-right"><p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Stok</p><div className="flex items-baseline justify-end gap-1"><span className={`text-sm font-black ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>{item.qty}</span><span className="text-[9px] font-semibold text-slate-500">{item.unit || 'Pcs'}</span></div>{item.price > 0 && <div className="text-[10px] text-green-600 font-bold mt-0.5 bg-green-50 px-1.5 rounded-md inline-block">{formatRupiah(item.price)}</div>}</div></div><div className="flex gap-1.5 flex-shrink-0 pl-2 border-l border-slate-100 ml-1"><button onClick={() => onEdit(item)} className="w-7 h-7 rounded-lg text-[10px] bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200 transition-colors flex items-center justify-center"><Icon name="pen" /></button><button onClick={() => onDelete(item)} className="w-7 h-7 rounded-lg text-[10px] bg-white text-slate-400 hover:bg-red-50 hover:text-red-500 border border-slate-200 hover:border-red-200 transition-colors flex items-center justify-center"><Icon name="trash" /></button></div></div>); })}</div><div ref={loaderRef} className="h-10 flex items-center justify-center w-full mt-4 pb-20 md:pb-0">{displayedLimit < filteredItems.length ? (<div className="flex items-center gap-2 text-slate-400 text-xs"><div className="w-4 h-4 border-2 border-slate-300 border-t-sky-500 rounded-full animate-spin"></div><span>Memuat...</span></div>) : filteredItems.length > 0 && ( <span className="text-[10px] text-slate-300">Semua data ditampilkan</span> )}</div></>)}
+                    </div>
+                </div>
+            );
+        };
+
         const FormView = ({ formData, setFormData, onSubmit, isEditing, onCancel, submitting, currentProfile }) => {
             const unitOptions = [ "Pcs", "Box", "Botol", "Strip", "Tube", "Ampul", "Vial", "Tablet", "Kapsul", "Sachet", "Pack", "Roll", "Set", "Lembar", "Pasang", "Galon" ];
             if (currentProfile.id === 'all_stores') { return ( <div className="fade-in max-w-xl mx-auto w-full pt-10 text-center"> <div className="bg-white/90 p-8 rounded-3xl shadow-soft"> <div className="text-amber-500 text-4xl mb-3"><Icon name="triangle-exclamation" /></div> <h3 className="text-xl font-bold text-slate-800 mb-2">Mode Gabungan</h3> <p className="text-slate-500 text-sm">Anda tidak bisa mengedit stok saat melihat mode "Semua Toko". Silakan pilih toko spesifik terlebih dahulu.</p> </div> </div> ); }
@@ -1488,71 +1643,6 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                             <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-dashed border-slate-200"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1 flex justify-between">Minimum Stok (Khusus) <span className="text-[9px] font-normal lowercase text-slate-400">kosongkan jika ikut aturan global</span></label><input type="number" className="w-full p-2.5 rounded-lg bg-white border border-slate-200 focus:border-sky-500 outline-none text-sm" placeholder="Contoh: 10 (Item ini akan 'Low' jika dibawah 10)" value={formData.minStock || ''} onChange={e=>setFormData({...formData, minStock: e.target.value})} /></div>
                             <div className="pt-4 flex gap-3">{isEditing && (<button type="button" disabled={submitting} onClick={onCancel} className="flex-1 py-3.5 rounded-xl text-slate-600 font-bold bg-white border border-slate-200 hover:bg-slate-50 text-sm transition-colors">Batal</button>)}<button type="submit" disabled={submitting} className={`flex-1 py-3.5 rounded-xl text-white font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 ${isEditing ? 'bg-slate-700 hover:bg-slate-800' : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'}`}>{submitting ? <div className="typing-dot bg-white" /> : <Icon name={isEditing ? 'check' : 'plus'} />} {submitting ? 'Menyimpan...' : (isEditing ? 'Simpan' : 'Tambah')}</button></div>
                         </form>
-                    </div>
-                </div>
-            );
-        };
-
-        const ListView = ({ items, loading, settings, searchQuery, setSearchQuery, showOnlyLowStock, selectedRacks, setSelectedRacks, uniqueRacksData, onCopySuccess, onEdit, onDelete, onDeleteRack, currentProfile }) => {
-            if (currentProfile.id === 'all_stores') { return ( <div className="fade-in h-full flex flex-col items-center justify-center text-center p-6 pb-20 md:pb-0 relative z-10"> <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-3xl mb-4 shadow-sm"><Icon name="shop-lock" /></div> <h2 className="text-xl font-bold text-slate-800 mb-2">Mode Gabungan (View Only)</h2> <p className="text-slate-500 max-w-xs mx-auto mb-6 text-sm">Anda sedang melihat stok gabungan semua toko. Untuk mengedit stok, silakan pilih salah satu toko spesifik dari menu di kiri atas.</p> <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 max-w-md w-full text-left"> <div className="flex justify-between items-center border-b border-slate-100 pb-2 mb-2"> <span className="font-bold text-slate-700">Total Item</span> <span className="font-black text-slate-800">{items.length}</span> </div> <div className="max-h-60 overflow-y-auto space-y-2"> {items.slice(0, 10).map((item, idx) => ( <div key={idx} className="text-xs flex justify-between"> <span className="text-slate-600 truncate w-2/3">{item.name}</span> <span className="font-bold text-slate-800">{item.qty}</span> </div> ))} {items.length > 10 && <p className="text-center text-xs text-slate-400 italic">...dan {items.length - 10} lainnya</p>} </div> </div> </div> ); }
-            
-            // FUSE SEARCH HOOK (MOVED INSIDE COMPONENT)
-            const fuse = useMemo(() => new Fuse(items, { keys: ['name', 'rack'], threshold: 0.3 }), [items]);
-            const filtered = useMemo(() => { 
-                let res = items; 
-                if (searchQuery) res = fuse.search(searchQuery).map(r => r.item); 
-                if (showOnlyLowStock) { const limit = settings.lowStockThreshold || DEFAULT_SETTINGS.lowStockThreshold; res = res.filter(i => safeNumber(i.qty) < (i.minStock ? safeNumber(i.minStock) : limit)); } 
-                if (selectedRacks.length > 0) res = res.filter(i => { if (!i.rack) return false; const itemRacks = i.rack.split(',').map(r => r.trim()); return itemRacks.some(r => selectedRacks.includes(r)); }); 
-                return res.slice(0, 50); 
-            }, [items, searchQuery, showOnlyLowStock, selectedRacks, settings, fuse]);
-
-            return (
-                <div className="fade-in h-full flex flex-col relative z-10 pb-20 md:pb-0">
-                    <div className="flex flex-col md:flex-row gap-4 mb-4">
-                        <div className="relative group flex-1">
-                            <input autoFocus type="text" placeholder="Cari barang atau rak..." className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white border border-slate-200 shadow-soft focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all font-bold text-slate-700 placeholder:font-normal placeholder:text-slate-400" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-                            <Icon name="magnifying-glass" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg group-focus-within:text-sky-500" />
-                        </div>
-                        {/* Rack Filter */}
-                        <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 custom-scrollbar max-w-full md:max-w-md">
-                            {uniqueRacksData.map(r => (
-                                <button key={r.name} onClick={() => setSelectedRacks(prev => prev.includes(r.name) ? prev.filter(x => x !== r.name) : [...prev, r.name])} onContextMenu={(e) => { e.preventDefault(); onDeleteRack(r.name); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1 ${selectedRacks.includes(r.name) ? 'bg-sky-600 text-white border-sky-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-sky-300'}`}>
-                                    {r.name} {r.hasNew && <span className="w-1.5 h-1.5 rounded-full bg-red-500 ml-1 animate-pulse"></span>}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-3">
-                        {loading ? (<div className="flex justify-center items-center py-20"><div className="typing-dot bg-sky-500"></div></div>) : filtered.length === 0 ? (<div className="text-center py-20 opacity-60"><Icon name="box-open" className="text-5xl text-slate-300 mb-4" /><p className="text-slate-500 font-medium">Tidak ada barang yang cocok.</p></div>) : (
-                            filtered.map(item => {
-                                const isLow = safeNumber(item.qty) < (item.minStock ? safeNumber(item.minStock) : (settings.lowStockThreshold || 5));
-                                const isNew = isNewItem(item.createdAt);
-                                return (
-                                    <div key={item.id} className={`bg-white p-4 rounded-2xl border transition-all hover:shadow-md group relative overflow-hidden ${isLow ? 'border-amber-200 bg-amber-50/30' : 'border-slate-100'}`}>
-                                        {isNew && <div className="absolute top-0 right-0 bg-rose-500 text-white text-[9px] font-bold px-2 py-1 rounded-bl-xl shadow-sm z-10">BARU</div>}
-                                        <div className="flex justify-between items-start relative z-0">
-                                            <div className="pr-4 min-w-0 flex-1">
-                                                <div className="flex items-center gap-2 mb-1">
-                                                    <span className="bg-slate-100 text-slate-500 text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-200">{item.rack || '-'}</span>
-                                                    {item.exp && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex items-center gap-1 ${getDaysRemaining(item.exp) < 30 ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'}`}><Icon name="calendar" className="text-[8px]" /> {formatDateIndo(item.exp)}</span>}
-                                                </div>
-                                                <h3 className="font-bold text-slate-800 text-sm md:text-base leading-snug break-words">{item.name}</h3>
-                                                <p className="text-xs text-sky-600 font-bold mt-1">{formatRupiah(item.price)} <span className="text-[10px] text-slate-400 font-normal">/ {item.unit}</span></p>
-                                            </div>
-                                            <div className="text-right flex flex-col items-end">
-                                                <div className={`text-xl font-black ${isLow ? 'text-amber-600' : 'text-slate-800'}`}>{item.qty}</div>
-                                                <div className="text-[10px] text-slate-400 font-medium">{item.unit}</div>
-                                            </div>
-                                        </div>
-                                        <div className="mt-4 pt-3 border-t border-dashed border-slate-100 flex justify-end gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                            <button onClick={() => { onEdit(item); }} className="px-3 py-1.5 rounded-lg bg-sky-50 text-sky-600 text-xs font-bold border border-sky-100 hover:bg-sky-100 flex items-center gap-1"><Icon name="pen" /> Edit</button>
-                                            <button onClick={() => onDelete(item)} className="px-3 py-1.5 rounded-lg bg-red-50 text-red-500 text-xs font-bold border border-red-100 hover:bg-red-100 flex items-center gap-1"><Icon name="trash" /> Hapus</button>
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        )}
                     </div>
                 </div>
             );
@@ -1827,7 +1917,7 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.12 (Rekap WA)</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.12 (Update Buku Kas)</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
