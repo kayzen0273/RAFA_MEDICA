@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V25.12 - Buku Kas Update)</title>
+    <title>Sistem Kasir Rafa Medica (V25.13 - Buku Kas Multi Expense)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -324,6 +324,16 @@
             return (new Date() - date) < (24 * 60 * 60 * 1000);
         };
         const formatDateIndo = (dateStr) => { if (!dateStr) return "-"; return new Date(dateStr).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: '2-digit' }); };
+        
+        // UTILS DATE FULL (Hari, Tanggal) - DITAMBAHKAN
+        const formatDateFull = (dateStr) => {
+            if (!dateStr) return "-";
+            const d = new Date(dateStr);
+            const days = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+            return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+        };
+
         const getDaysRemaining = (dateStr) => { if (!dateStr) return null; const today = new Date(); today.setHours(0,0,0,0); const exp = new Date(dateStr); exp.setHours(0,0,0,0); return Math.ceil((exp - today) / (1000 * 60 * 60 * 24)); };
 
         const Toast = ({ message, show, onClose, type = "success" }) => {
@@ -673,7 +683,7 @@
             );
         };
 
-        // --- NEW CASH BOOK COMPONENT (WITH EXPENSE & WHATSAPP) ---
+        // --- NEW CASH BOOK COMPONENT (WITH MULTI-EXPENSE & WHATSAPP) ---
         const CashBookView = ({ user, currentProfile, showToast }) => {
             const [viewMode, setViewMode] = useState('operational'); // 'operational' | 'revenue'
             const [entries, setEntries] = useState([]);
@@ -688,19 +698,23 @@
             const [formDesc, setFormDesc] = useState('');
             const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
 
-            // Revenue Form State
-            const [revForm, setRevForm] = useState({ date: new Date().toISOString().slice(0, 10), total: '', deposited: '', prevBalance: 0, expenseAmount: '', expenseNote: '' });
+            // Revenue Form State (UPDATED: expenses array)
+            const [revForm, setRevForm] = useState({ 
+                date: new Date().toISOString().slice(0, 10), 
+                total: '', 
+                deposited: '', 
+                prevBalance: 0, 
+                expenses: [] // Array of { name: '', amount: 0 }
+            });
+            const [tempExpName, setTempExpName] = useState('');
+            const [tempExpAmount, setTempExpAmount] = useState('');
             const [isRevSubmitting, setIsRevSubmitting] = useState(false);
 
             useEffect(() => {
                 if (!user) return;
                 
                 // Operational Data
-                const qOp = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(100)
-                );
+                const qOp = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow'), window.orderBy('date', 'desc'), window.limit(100));
                 const unsubOp = window.onSnapshot(qOp, (snapshot) => {
                     const allData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     const storeData = currentProfile.id === 'all_stores' ? allData : allData.filter(d => d.storeId === currentProfile.id);
@@ -709,13 +723,18 @@
                 });
 
                 // Revenue Data
-                const qRev = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(50)
-                );
+                const qRev = window.query(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'), window.orderBy('date', 'desc'), window.limit(50));
                 const unsubRev = window.onSnapshot(qRev, (snapshot) => {
-                    const allLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    const allLogs = snapshot.docs.map(doc => {
+                        const data = doc.data();
+                        // Backward compatibility
+                        let loadedExpenses = data.expenses || [];
+                        if (loadedExpenses.length === 0 && safeNumber(data.expenseAmount) > 0) {
+                            loadedExpenses = [{ name: data.expenseNote || 'Pengeluaran', amount: data.expenseAmount }];
+                        }
+                        return { id: doc.id, ...data, expenses: loadedExpenses };
+                    });
+                    
                     const storeLogs = currentProfile.id === 'all_stores' ? allLogs : allLogs.filter(d => d.storeId === currentProfile.id);
                     setRevenueLogs(storeLogs);
 
@@ -734,8 +753,7 @@
             const opStats = useMemo(() => {
                 let totalIn = 0, totalOut = 0;
                 entries.forEach(e => {
-                    if (e.type === 'in') totalIn += safeNumber(e.amount);
-                    else totalOut += safeNumber(e.amount);
+                    if (e.type === 'in') totalIn += safeNumber(e.amount); else totalOut += safeNumber(e.amount);
                 });
                 return { totalIn, totalOut, balance: totalIn - totalOut };
             }, [entries]);
@@ -750,7 +768,7 @@
                         storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
                         user: user.email, createdAt: window.serverTimestamp()
                     });
-                    logToDB('KEUANGAN', `Catat ${formType === 'in' ? 'Masuk' : 'Keluar'}: ${formDesc} (${formatRupiah(formAmount)})`, currentProfile.id, user.email);
+                    logToDB('KEUANGAN', `Catat ${formType === 'in' ? 'Masuk' : 'Keluar'}: ${formDesc}`, currentProfile.id, user.email);
                     showToast("Transaksi berhasil disimpan");
                     setFormAmount(''); setFormDesc(''); setShowModal(false);
                 } catch (err) { showToast("Gagal menyimpan data", "error"); } finally { setSubmitting(false); }
@@ -761,6 +779,20 @@
                 try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow', id)); showToast("Transaksi dihapus"); } catch(err) { showToast("Gagal menghapus", "error"); }
             };
 
+            // ADD EXPENSE TO LIST
+            const addExpenseItem = () => {
+                if (!tempExpName || !tempExpAmount) return;
+                const newExp = { name: tempExpName, amount: safeNumber(tempExpAmount) };
+                setRevForm(prev => ({ ...prev, expenses: [...prev.expenses, newExp] }));
+                setTempExpName('');
+                setTempExpAmount('');
+            };
+
+            // REMOVE EXPENSE FROM LIST
+            const removeExpenseItem = (index) => {
+                setRevForm(prev => ({ ...prev, expenses: prev.expenses.filter((_, i) => i !== index) }));
+            };
+
             const handleRevSubmit = async (e) => {
                 e.preventDefault();
                 if(!revForm.total || !revForm.date) return;
@@ -769,18 +801,27 @@
                 const total = safeNumber(revForm.total);
                 const deposited = safeNumber(revForm.deposited);
                 const prev = safeNumber(revForm.prevBalance);
-                const expense = safeNumber(revForm.expenseAmount);
-                const expenseNote = revForm.expenseNote || '';
-                const remaining = (prev + total) - expense - deposited;
+                
+                // Calculate total expense from array
+                const totalExpense = revForm.expenses.reduce((acc, curr) => acc + safeNumber(curr.amount), 0);
+                
+                // Remaining logic: (Prev + Revenue) - Expense - Deposited
+                const remaining = (prev + total) - totalExpense - deposited;
 
                 try {
                     const existing = revenueLogs.find(l => l.date === revForm.date);
                     const data = {
                         date: revForm.date,
                         storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                        totalRevenue: total, deposited, remaining, previousBalance: prev,
-                        expenseAmount: expense, expenseNote: expenseNote,
-                        user: user.email, updatedAt: window.serverTimestamp()
+                        totalRevenue: total, 
+                        deposited, 
+                        remaining, 
+                        previousBalance: prev,
+                        expenses: revForm.expenses, // Save array
+                        expenseAmount: totalExpense, // Save total for quick stats
+                        expenseNote: revForm.expenses.map(e => e.name).join(', '), // Save joined string for legacy
+                        user: user.email, 
+                        updatedAt: window.serverTimestamp()
                     };
 
                     if (existing) {
@@ -791,7 +832,7 @@
                         await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue'), data);
                         showToast("Data setoran disimpan");
                     }
-                    setRevForm(prev => ({ ...prev, total: '', deposited: '', expenseAmount: '', expenseNote: '' }));
+                    setRevForm(prev => ({ ...prev, total: '', deposited: '', expenses: [] }));
                 } catch(err) { showToast("Gagal simpan setoran", "error"); } finally { setIsRevSubmitting(false); }
             };
 
@@ -800,26 +841,39 @@
                 try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', id)); showToast("Dihapus"); } catch(err) { showToast("Gagal hapus", "error"); }
             };
 
+            // UPDATED COPY TO WA LOGIC
             const handleCopyRevenueToWA = (log) => {
                 const prev = safeNumber(log.previousBalance);
                 const income = safeNumber(log.totalRevenue);
-                const exp = safeNumber(log.expenseAmount);
-                const expNote = log.expenseNote ? `(${log.expenseNote})` : '';
-                const totalMoney = (prev + income) - exp;
+                const totalExp = safeNumber(log.expenseAmount);
+                const deposited = safeNumber(log.deposited);
+                
+                // Hitungan Total (Uang Tersedia sebelum setor)
+                const netBalance = (prev + income) - totalExp;
+                const remaining = log.remaining;
+
+                // Format Expenses List
+                let expenseListText = "";
+                if (log.expenses && log.expenses.length > 0) {
+                    log.expenses.forEach((exp, idx) => {
+                        expenseListText += `${idx + 1}. ${exp.name} : ${formatRupiah(exp.amount)}\n`;
+                    });
+                } else if (totalExp > 0) {
+                    expenseListText += `1. ${log.expenseNote || 'Pengeluaran'} : ${formatRupiah(totalExp)}\n`;
+                } else {
+                    expenseListText = "-\n";
+                }
 
                 const text = `*LAPORAN SETORAN HARIAN*
-📍 Cabang: ${currentProfile.name}
-📅 Tanggal: ${formatDateIndo(log.date)}
+${currentProfile.name} – ${formatDateFull(log.date)}
 
-💰 Sisa Kemarin: ${formatRupiah(prev)}
-💵 Pendapatan: ${formatRupiah(income)}
-${exp > 0 ? `🔻 Pengeluaran: -${formatRupiah(exp)} ${expNote}` : ''}
----------------------------
-Sisa Uang Bersih: ${formatRupiah(totalMoney)}
-
-🏦 *DISETOR: ${formatRupiah(log.deposited)}*
-
-📫 *SISA DI LACI: ${formatRupiah(log.remaining)}*`;
+Sisa kemarin : ${formatRupiah(prev)}
+Pendapatan : ${formatRupiah(income)}
+Pengeluaran : 
+${expenseListText}---------------------------------------------
+*Total :  ${formatRupiah(netBalance)}*
+Setor : ${formatRupiah(deposited)} ✅
+Sisa : ${formatRupiah(remaining)}`;
 
                 if (navigator.clipboard && window.isSecureContext) {
                     navigator.clipboard.writeText(text).then(() => showToast("Disalin! Tempel di WA.")).catch(() => alert("Gagal copy otomatis."));
@@ -828,48 +882,29 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                 }
             };
 
-            const currentRevRemaining = (safeNumber(revForm.prevBalance) + safeNumber(revForm.total)) - safeNumber(revForm.expenseAmount) - safeNumber(revForm.deposited);
+            const currentTotalExpense = revForm.expenses.reduce((acc, curr) => acc + safeNumber(curr.amount), 0);
+            const currentRevRemaining = (safeNumber(revForm.prevBalance) + safeNumber(revForm.total)) - currentTotalExpense - safeNumber(revForm.deposited);
 
             if (currentProfile.id === 'all_stores') {
-                return (
-                    <div className="fade-in max-w-md mx-auto pt-10 text-center px-4">
-                        <div className="bg-white p-8 rounded-3xl shadow-soft">
-                            <div className="text-amber-500 text-4xl mb-3"><Icon name="triangle-exclamation" /></div>
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">Mode Gabungan</h3>
-                            <p className="text-slate-500 text-sm">Silakan pilih toko spesifik (Rafa 1 / Rafa 2) untuk mencatat keuangan.</p>
-                        </div>
-                    </div>
-                );
+                return <div className="fade-in max-w-md mx-auto pt-10 text-center px-4"><p className="text-slate-500">Mode Gabungan (Pilih Toko Spesifik)</p></div>;
             }
 
             return (
                 <div className="fade-in pb-24 md:pb-0 h-full relative z-10 max-w-md mx-auto font-sans">
-                    {/* Header */}
                     <div className="flex justify-between items-center mb-4">
                         <div className="flex items-center gap-2">
-                            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
-                                <Icon name="book" className="text-lg" />
-                            </div>
-                            <div>
-                                <h1 className="text-lg font-bold tracking-tight text-slate-800">Buku Kas</h1>
-                                <p className="text-[10px] text-slate-500 font-bold">{currentProfile.name}</p>
-                            </div>
+                            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg"><Icon name="book" /></div>
+                            <div><h1 className="text-lg font-bold text-slate-800">Buku Kas</h1><p className="text-[10px] text-slate-500 font-bold">{currentProfile.name}</p></div>
                         </div>
                     </div>
 
-                    {/* TABS */}
                     <div className="flex p-1 bg-white rounded-xl mb-6 shadow-sm border border-slate-100">
-                        <button onClick={() => setViewMode('operational')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'operational' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
-                            Operasional Harian
-                        </button>
-                        <button onClick={() => setViewMode('revenue')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'revenue' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
-                            Rekap Setoran
-                        </button>
+                        <button onClick={() => setViewMode('operational')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'operational' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>Operasional Harian</button>
+                        <button onClick={() => setViewMode('revenue')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'revenue' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>Rekap Setoran</button>
                     </div>
 
                     {viewMode === 'operational' ? (
                         <>
-                            {/* Saldo Card */}
                             <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-xl shadow-blue-200 relative overflow-hidden mb-6">
                                 <Icon name="wallet" className="absolute -right-4 -bottom-4 text-9xl text-white opacity-10 rotate-12" />
                                 <p className="text-blue-100 text-sm mb-1 opacity-90">Saldo Operasional</p>
@@ -879,42 +914,32 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                     <div><div className="flex items-center gap-1 text-red-200 text-[10px] font-bold uppercase"><Icon name="circle-arrow-up" /> Keluar</div><p className="font-semibold">{formatRupiah(opStats.totalOut)}</p></div>
                                 </div>
                             </div>
-
-                            {/* List Transaksi */}
                             <div className="space-y-3 pb-20">
-                                <div className="flex justify-between items-end px-1"><h3 className="font-bold text-slate-700 text-sm">Riwayat Operasional</h3></div>
-                                {entries.length === 0 ? (
-                                    <div className="text-center py-10 opacity-60"><Icon name="receipt" className="text-3xl text-slate-300 mb-2" /><p className="text-xs text-slate-500">Belum ada catatan.</p></div>
-                                ) : (
-                                    entries.map(t => (
-                                        <div key={t.id} className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center group">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${t.type === 'in' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}><Icon name={t.type === 'in' ? 'arrow-down' : 'arrow-up'} /></div>
-                                                <div><p className="font-bold text-slate-800 text-sm">{t.description}</p><p className="text-[10px] text-slate-400">{formatDateIndo(t.date)}</p></div>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className={`font-bold text-sm ${t.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'in' ? '+' : '-'} {formatRupiah(t.amount)}</p>
-                                                <button onClick={() => handleOpDelete(t.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1"><Icon name="trash" /></button>
-                                            </div>
+                                <h3 className="font-bold text-slate-700 text-sm">Riwayat Operasional</h3>
+                                {entries.map(t => (
+                                    <div key={t.id} className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center group">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${t.type === 'in' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}><Icon name={t.type === 'in' ? 'arrow-down' : 'arrow-up'} /></div>
+                                            <div><p className="font-bold text-slate-800 text-sm">{t.description}</p><p className="text-[10px] text-slate-400">{formatDateIndo(t.date)}</p></div>
                                         </div>
-                                    ))
-                                )}
+                                        <div className="text-right">
+                                            <p className={`font-bold text-sm ${t.type === 'in' ? 'text-green-600' : 'text-red-600'}`}>{t.type === 'in' ? '+' : '-'} {formatRupiah(t.amount)}</p>
+                                            <button onClick={() => handleOpDelete(t.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1"><Icon name="trash" /></button>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-
-                            {/* Floating Button */}
-                            <button onClick={() => setShowModal(true)} className="fixed bottom-24 md:bottom-10 right-6 bg-blue-600 hover:bg-blue-700 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform active:scale-90 z-30"><Icon name="plus" className="text-2xl" /></button>
-                            
-                            {/* Modal Form */}
+                            <button onClick={() => setShowModal(true)} className="fixed bottom-24 md:bottom-10 right-6 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30"><Icon name="plus" className="text-2xl" /></button>
                             {showModal && (
                                 <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm fade-in">
                                     <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
-                                        <div className="flex justify-between mb-4"><h3 className="font-bold text-slate-800">Catat Operasional</h3><button onClick={() => setShowModal(false)}><Icon name="xmark" /></button></div>
+                                        <h3 className="font-bold text-slate-800 mb-4">Catat Operasional</h3>
                                         <form onSubmit={handleOpSubmit} className="space-y-3">
-                                            <div className="flex bg-slate-100 p-1 rounded-lg"><button type="button" onClick={() => setFormType('in')} className={`flex-1 py-2 rounded-md text-xs font-bold ${formType === 'in' ? 'bg-green-500 text-white shadow' : 'text-slate-500'}`}>Pemasukan</button><button type="button" onClick={() => setFormType('out')} className={`flex-1 py-2 rounded-md text-xs font-bold ${formType === 'out' ? 'bg-red-500 text-white shadow' : 'text-slate-500'}`}>Pengeluaran</button></div>
+                                            <div className="flex bg-slate-100 p-1 rounded-lg"><button type="button" onClick={() => setFormType('in')} className={`flex-1 py-2 rounded-md text-xs font-bold ${formType === 'in' ? 'bg-green-500 text-white' : 'text-slate-500'}`}>Pemasukan</button><button type="button" onClick={() => setFormType('out')} className={`flex-1 py-2 rounded-md text-xs font-bold ${formType === 'out' ? 'bg-red-500 text-white' : 'text-slate-500'}`}>Pengeluaran</button></div>
                                             <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold" />
                                             <input type="number" placeholder="Nominal (Rp)" value={formAmount} onChange={e => setFormAmount(e.target.value)} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold" />
-                                            <input type="text" placeholder="Keterangan (ex: Beli Plastik)" value={formDesc} onChange={e => setFormDesc(e.target.value)} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
-                                            <button type="submit" disabled={submitting} className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold mt-2">{submitting ? 'Menyimpan...' : 'Simpan'}</button>
+                                            <input type="text" placeholder="Keterangan" value={formDesc} onChange={e => setFormDesc(e.target.value)} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm" />
+                                            <div className="flex gap-2 mt-4"><button type="button" onClick={() => setShowModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold">Batal</button><button type="submit" className="flex-1 py-3 bg-slate-800 text-white rounded-xl font-bold">Simpan</button></div>
                                         </form>
                                     </div>
                                 </div>
@@ -922,7 +947,6 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                         </>
                     ) : (
                         <div className="space-y-6 pb-20">
-                            {/* Form Rekap Setoran */}
                             <div className="bg-white p-5 rounded-2xl shadow-sm border border-purple-100">
                                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Icon name="pen-to-square" className="text-purple-600" /> Input Setoran Harian</h3>
                                 <form onSubmit={handleRevSubmit} className="space-y-3">
@@ -930,60 +954,65 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                         <div><label className="text-[10px] font-bold text-slate-400 uppercase">Tanggal</label><input type="date" value={revForm.date} onChange={e => setRevForm({...revForm, date: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold" /></div>
                                         <div><label className="text-[10px] font-bold text-slate-400 uppercase">Sisa Kemarin</label><input type="number" value={revForm.prevBalance} onChange={e => setRevForm({...revForm, prevBalance: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600" /></div>
                                     </div>
-                                    <div><label className="text-[10px] font-bold text-slate-400 uppercase">Total Pendapatan (Manual)</label><input type="number" placeholder="0" value={revForm.total} onChange={e => setRevForm({...revForm, total: e.target.value})} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:border-purple-500 focus:ring-1 focus:ring-purple-500" /></div>
+                                    <div><label className="text-[10px] font-bold text-slate-400 uppercase">Total Pendapatan</label><input type="number" placeholder="0" value={revForm.total} onChange={e => setRevForm({...revForm, total: e.target.value})} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:border-purple-500 focus:ring-1 focus:ring-purple-500" /></div>
                                     
-                                    {/* NEW EXPENSE FIELDS */}
                                     <div className="p-3 bg-red-50 rounded-xl border border-red-100 space-y-2">
-                                        <h4 className="text-xs font-bold text-red-800 flex items-center gap-1"><Icon name="arrow-trend-down" /> Pengeluaran Toko</h4>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <input type="number" placeholder="Nominal" value={revForm.expenseAmount} onChange={e => setRevForm({...revForm, expenseAmount: e.target.value})} className="w-full p-2 bg-white border border-red-200 rounded-lg text-sm font-bold text-red-600 placeholder:font-normal placeholder:text-red-300" />
-                                            <input type="text" placeholder="Catatan (Ex: Listrik)" value={revForm.expenseNote} onChange={e => setRevForm({...revForm, expenseNote: e.target.value})} className="w-full p-2 bg-white border border-red-200 rounded-lg text-xs font-medium text-slate-700 placeholder:text-slate-300" />
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="text-xs font-bold text-red-800 flex items-center gap-1"><Icon name="arrow-trend-down" /> Daftar Pengeluaran</h4>
+                                            <span className="text-xs font-black text-red-600">{formatRupiah(currentTotalExpense)}</span>
+                                        </div>
+                                        {revForm.expenses.length > 0 && (
+                                            <div className="space-y-1 mb-2 bg-white rounded-lg p-2 border border-red-100">
+                                                {revForm.expenses.map((exp, idx) => (
+                                                    <div key={idx} className="flex justify-between items-center text-xs border-b border-dashed border-slate-100 last:border-0 py-1">
+                                                        <span className="font-medium text-slate-600 truncate flex-1">{idx+1}. {exp.name}</span>
+                                                        <div className="flex items-center gap-2"><span className="font-bold text-slate-800">{formatRupiah(exp.amount)}</span><button type="button" onClick={() => removeExpenseItem(idx)} className="text-red-400 hover:text-red-600"><Icon name="xmark" /></button></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="flex gap-2 items-end">
+                                            <div className="flex-1">
+                                                <input type="text" placeholder="Ket. (ex: Listrik)" value={tempExpName} onChange={e => setTempExpName(e.target.value)} className="w-full p-2 bg-white border border-red-200 rounded-lg text-xs font-medium mb-1 outline-none" />
+                                                <input type="number" placeholder="Rp" value={tempExpAmount} onChange={e => setTempExpAmount(e.target.value)} className="w-full p-2 bg-white border border-red-200 rounded-lg text-xs font-bold outline-none" />
+                                            </div>
+                                            <button type="button" onClick={addExpenseItem} disabled={!tempExpName || !tempExpAmount} className="bg-red-500 text-white w-8 h-16 rounded-lg flex items-center justify-center hover:bg-red-600 disabled:opacity-50 transition-colors shadow-sm"><Icon name="plus" /></button>
                                         </div>
                                     </div>
 
                                     <div><label className="text-[10px] font-bold text-slate-400 uppercase">Disetor Ke Owner</label><input type="number" placeholder="0" value={revForm.deposited} onChange={e => setRevForm({...revForm, deposited: e.target.value})} required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:border-green-500 focus:ring-1 focus:ring-green-500" /></div>
-                                    
-                                    <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 flex justify-between items-center mt-2">
-                                        <span className="text-xs font-bold text-purple-700">Sisa Belum Disetor:</span>
-                                        <span className={`text-lg font-black ${currentRevRemaining < 0 ? 'text-red-600' : 'text-slate-800'}`}>{formatRupiah(currentRevRemaining)}</span>
-                                    </div>
-
+                                    <div className="bg-purple-50 p-3 rounded-xl border border-purple-100 flex justify-between items-center mt-2"><span className="text-xs font-bold text-purple-700">Sisa Belum Disetor:</span><span className={`text-lg font-black ${currentRevRemaining < 0 ? 'text-red-600' : 'text-slate-800'}`}>{formatRupiah(currentRevRemaining)}</span></div>
                                     <button type="submit" disabled={isRevSubmitting} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 mt-2 active:scale-95 transition-all">{isRevSubmitting ? 'Menyimpan...' : 'Simpan Laporan'}</button>
                                 </form>
                             </div>
 
-                            {/* List Riwayat Setoran */}
                             <div className="space-y-3">
                                 <h3 className="font-bold text-slate-700 text-sm px-1">Riwayat Setoran</h3>
-                                {revenueLogs.length === 0 ? (
-                                    <div className="text-center py-8 opacity-60"><Icon name="file-invoice" className="text-3xl text-slate-300 mb-2" /><p className="text-xs text-slate-500">Belum ada data setoran.</p></div>
-                                ) : (
-                                    revenueLogs.map(log => (
-                                        <div key={log.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative group">
-                                            <div className="flex justify-between items-start mb-2 border-b border-dashed border-slate-100 pb-2">
-                                                <div><span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{formatDateIndo(log.date)}</span></div>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => handleCopyRevenueToWA(log)} className="flex items-center gap-1 text-[10px] font-bold bg-[#25D366] text-white px-2 py-1 rounded hover:bg-[#128C7E] transition-colors"><Icon name="whatsapp" type="brands" /> Salin WA</button>
-                                                    <button onClick={() => handleRevDelete(log.id)} className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"><Icon name="trash" /></button>
-                                                </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
-                                                <div><p className="text-slate-400 font-medium">Sisa Kemarin</p><p className="font-bold text-slate-600">{formatRupiah(log.previousBalance)}</p></div>
-                                                <div className="text-right"><p className="text-slate-400 font-medium">Pendapatan</p><p className="font-bold text-slate-800">{formatRupiah(log.totalRevenue)}</p></div>
-                                                
-                                                {safeNumber(log.expenseAmount) > 0 && (
-                                                    <div className="col-span-2 bg-red-50 p-1.5 rounded flex justify-between items-center my-1">
-                                                        <span className="text-[10px] text-red-600 font-bold">Pengeluaran ({log.expenseNote || '-'})</span>
-                                                        <span className="text-xs font-bold text-red-600">-{formatRupiah(log.expenseAmount)}</span>
-                                                    </div>
-                                                )}
-
-                                                <div><p className="text-slate-400 font-medium">Disetor</p><p className="font-bold text-green-600">{formatRupiah(log.deposited)}</p></div>
-                                                <div className="text-right"><p className="text-slate-400 font-medium">Sisa Di Laci</p><p className="font-black text-purple-600 text-sm">{formatRupiah(log.remaining)}</p></div>
+                                {revenueLogs.map(log => (
+                                    <div key={log.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative group">
+                                        <div className="flex justify-between items-start mb-2 border-b border-dashed border-slate-100 pb-2">
+                                            <div><span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{formatDateFull(log.date)}</span></div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => handleCopyRevenueToWA(log)} className="flex items-center gap-1 text-[10px] font-bold bg-[#25D366] text-white px-2 py-1 rounded hover:bg-[#128C7E] transition-colors"><Icon name="whatsapp" type="brands" /> Salin WA</button>
+                                                <button onClick={() => handleRevDelete(log.id)} className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"><Icon name="trash" /></button>
                                             </div>
                                         </div>
-                                    ))
-                                )}
+                                        <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+                                            <div><p className="text-slate-400 font-medium">Sisa Kemarin</p><p className="font-bold text-slate-600">{formatRupiah(log.previousBalance)}</p></div>
+                                            <div className="text-right"><p className="text-slate-400 font-medium">Pendapatan</p><p className="font-bold text-slate-800">{formatRupiah(log.totalRevenue)}</p></div>
+                                            {safeNumber(log.expenseAmount) > 0 && (
+                                                <div className="col-span-2 bg-red-50 p-2 rounded border border-red-100 my-1">
+                                                    <div className="flex justify-between items-center mb-1"><span className="text-[10px] text-red-600 font-bold">Total Pengeluaran</span><span className="text-xs font-bold text-red-600">-{formatRupiah(log.expenseAmount)}</span></div>
+                                                    {log.expenses && log.expenses.length > 0 ? (
+                                                        <ul className="list-disc list-inside pl-1 space-y-0.5">{log.expenses.map((exp, i) => (<li key={i} className="text-[9px] text-slate-600 flex justify-between"><span>{exp.name}</span><span>{formatRupiah(exp.amount)}</span></li>))}</ul>
+                                                    ) : (<p className="text-[9px] text-slate-500 italic">{log.expenseNote || 'Tanpa Keterangan'}</p>)}
+                                                </div>
+                                            )}
+                                            <div><p className="text-slate-400 font-medium">Disetor</p><p className="font-bold text-green-600">{formatRupiah(log.deposited)}</p></div>
+                                            <div className="text-right"><p className="text-slate-400 font-medium">Sisa Di Laci</p><p className="font-black text-purple-600 text-sm">{formatRupiah(log.remaining)}</p></div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}
@@ -1917,7 +1946,7 @@ Sisa Uang Bersih: ${formatRupiah(totalMoney)}
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.12 (Update Buku Kas)</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.13 (Buku Kas Multi Expense)</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
