@@ -1744,6 +1744,17 @@ Sisa : ${formatRupiah(remaining)}`;
 
         const FormView = ({ formData, setFormData, onSubmit, isEditing, onCancel, submitting, currentProfile }) => {
             const [selectedStoreForInput, setSelectedStoreForInput] = useState(currentProfile.id === 'all_stores' ? 'default' : currentProfile.id);
+            
+            // Auto-fill qty dari stok toko yang dipilih saat mode gabungan & sedang edit
+            useEffect(() => {
+                if (isEditing && currentProfile.id === 'all_stores' && formData.stocks) {
+                    const storeQty = formData.stocks[selectedStoreForInput] !== undefined
+                        ? formData.stocks[selectedStoreForInput]
+                        : 0;
+                    setFormData(prev => ({ ...prev, qty: storeQty }));
+                }
+            }, [selectedStoreForInput, isEditing]);
+
             const unitOptions = [ "Pcs", "Box", "Botol", "Strip", "Tube", "Ampul", "Vial", "Tablet", "Kapsul", "Sachet", "Pack", "Roll", "Set", "Lembar", "Pasang", "Galon" ];
             
             return (
@@ -2095,7 +2106,7 @@ Sisa : ${formatRupiah(remaining)}`;
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} />)}
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} />)}
-                        {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} />)}
+                        {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} />)}
                         {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', minStock: ''}); setActiveTab('list'); }} currentProfile={currentProfile} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} settings={settingsData} />)}
                         {activeTab === 'settings' && (<SettingsView settings={settingsData} onSave={handleSaveSettings} loading={submitting} />)}
