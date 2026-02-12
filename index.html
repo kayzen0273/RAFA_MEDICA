@@ -1951,11 +1951,15 @@ Sisa : ${formatRupiah(remaining)}`;
                         
                         if (existingItem) {
                              const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', existingItem.id);
-                             const stockUpdate = { [`stocks.${storeIdToUse}`]: newQty };
-                             await window.updateDoc(docRef, { ...baseData, ...stockUpdate });
+                             // HANYA update stok toko yang dipilih, TIDAK mengubah harga/rak/exp/satuan
+                             const stockOnlyUpdate = {
+                                 [`stocks.${storeIdToUse}`]: newQty,
+                                 updatedAt: window.serverTimestamp()
+                             };
+                             await window.updateDoc(docRef, stockOnlyUpdate);
                              logToDB('STOK', `Update stok item ${formData.name} (Existing) menjadi ${newQty} ${formData.unit}`, storeIdToUse, user.email);
                              const targetProfile = profiles.find(p => p.id === storeIdToUse);
-                             showToast(`Barang sudah ada. Stok ${targetProfile?.name || 'toko'} diupdate.`);
+                             showToast(`Barang sudah ada. Hanya stok ${targetProfile?.name || 'toko'} yang diupdate.`);
                         } else {
                             await window.addDoc(collectionRef, { 
                                 ...baseData, 
