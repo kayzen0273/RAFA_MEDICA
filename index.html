@@ -1607,6 +1607,8 @@ Sisa : ${formatRupiah(remaining)}`;
             const fallbackCopy = (text) => { const textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = "fixed"; textArea.style.left = "-9999px"; document.body.appendChild(textArea); textArea.select(); try { const successful = document.execCommand('copy'); if(successful) onCopySuccess("Disalin! Tempel di WA."); } catch (err) {} document.body.removeChild(textArea); };
             
             const handleResetAllStock = async () => {
+                if (isResetting) return; // Prevent double-click
+                
                 if (currentProfile.id === 'all_stores') {
                     alert("Tidak bisa reset stok dalam mode 'Semua Toko'. Pilih toko spesifik terlebih dahulu.");
                     setShowResetModal(false);
@@ -1616,19 +1618,31 @@ Sisa : ${formatRupiah(remaining)}`;
                 setIsResetting(true);
                 try {
                     const batch = window.writeBatch(window.db);
-                    const itemsToReset = items.filter(item => item.storeId === currentProfile.id);
                     
-                    itemsToReset.forEach(item => {
+                    // Reset semua item yang ada (tidak peduli storeId karena kita update stocks object)
+                    items.forEach(item => {
                         const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
-                        batch.update(docRef, { qty: 0 });
+                        
+                        // Update stocks object untuk store yang dipilih
+                        const stockUpdate = {
+                            [`stocks.${currentProfile.id}`]: 0,
+                            updatedAt: window.serverTimestamp()
+                        };
+                        
+                        // Jika default store, update qty juga untuk backward compatibility
+                        if (currentProfile.id === 'default') {
+                            stockUpdate.qty = 0;
+                        }
+                        
+                        batch.update(docRef, stockUpdate);
                     });
                     
                     await batch.commit();
                     
                     // Log aktivitas
-                    await window.logToDB('STOK', `Reset semua stok menjadi 0 (${itemsToReset.length} item)`, currentProfile.id, window.userEmail || 'system');
+                    await logToDB('STOK', `Reset semua stok menjadi 0 untuk ${currentProfile.name} (${items.length} item)`, currentProfile.id, 'admin');
                     
-                    onCopySuccess(`Berhasil reset ${itemsToReset.length} item menjadi stok 0!`);
+                    onCopySuccess(`Berhasil reset ${items.length} item menjadi stok 0!`);
                     setShowResetModal(false);
                 } catch (error) {
                     console.error("Reset Error:", error);
@@ -1696,13 +1710,13 @@ Sisa : ${formatRupiah(remaining)}`;
                         title="Reset Semua Stok?" 
                         message={`Semua stok barang di "${currentProfile.name}" akan diubah menjadi 0. Proses ini TIDAK BISA DIBATALKAN!`}
                         onConfirm={handleResetAllStock} 
-                        onCancel={() => setShowResetModal(false)}
+                        onCancel={() => !isResetting && setShowResetModal(false)}
                         confirmText={isResetting ? "Mereset..." : "Ya, Reset Semua"}
                         confirmColor="red"
                     >
                         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 font-medium">
                             <Icon name="triangle-exclamation" className="inline mr-1" />
-                            <strong>Peringatan:</strong> Tindakan ini akan mengubah stok <strong>{items.filter(i => i.storeId === currentProfile.id).length} item</strong> menjadi 0!
+                            <strong>Peringatan:</strong> Tindakan ini akan mengubah stok <strong>{items.length} item</strong> menjadi 0 untuk toko ini!
                         </div>
                     </ConfirmModal>
                 </div>
