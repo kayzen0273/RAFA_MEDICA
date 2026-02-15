@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Rafa Medica (V19 - Offline Mode)</title>
+    <title>Sistem Kasir Rafa Medica (V25.13 - Buku Kas Multi Expense)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -64,7 +64,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi Baru: Rafa Medica (stok-barang-49c8e)
         const userConfig = {
@@ -83,20 +83,6 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        // Enable Firebase Offline Persistence
-        enableIndexedDbPersistence(db)
-            .then(() => {
-                console.log('✅ Firebase offline persistence enabled');
-                window.dispatchEvent(new CustomEvent('firebaseOfflineReady'));
-            })
-            .catch((err) => {
-                if (err.code === 'failed-precondition') {
-                    console.warn('⚠️ Multiple tabs open, persistence only in one tab');
-                } else if (err.code === 'unimplemented') {
-                    console.warn('⚠️ Browser doesn\'t support persistence');
-                }
-            });
 
         // Expose ke window
         window.db = db;
@@ -183,234 +169,7 @@
         @keyframes stroke { 100% { stroke-dashoffset: 0; } }
         @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } }
         @keyframes fill { 100% { box-shadow: inset 0px 0px 0px 30px #22c55e; } }
-        
-        /* Offline Indicator Styles */
-        @keyframes pulse-offline {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .pulse-offline { animation: pulse-offline 2s ease-in-out infinite; }
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        .animate-spin-fast { animation: spin 1s linear infinite; }
     </style>
-
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlJhZmEgTWVkaWNhIFN5c3RlbSIsCiAgInNob3J0X25hbWUiOiAiUmFmYSBNZWRpY2EiLAogICJzdGFydF91cmwiOiAiLiIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiI2ZmZmZmZiIsCiAgInRoZW1lX2NvbG9yIjogIiMwZWE1ZTkiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICJkYXRhOmltYWdlL3N2Zyt4bWw7YmFzZTY0LFBITjJaeUI0Yld4dWN6MGlhSFIwY0RvdkwzZDNkeTUzTXk1dmNtY3ZNakF3TUM5emRtY2lJSGRwWkhSb1BTSXlOVFlpSUdobGFXZG9kRDBpTWpVMklqNDhjbVZqZENCM2FXUjBhRDBpTWpVMklpQm9aV2xuYUhROUlqSTFOaUlnWm1sc2JEMGlJekJsWVRWbE9TSXZQand2YzNablBnPT0iLAogICAgICAic2l6ZXMiOiAiMjU2eDI1NiIsCiAgICAgICJ0eXBlIjogImltYWdlL3N2Zyt4bWwiCiAgICB9CiAgXQp9">
-
-    <!-- Offline Manager - IndexedDB -->
-    <script>
-        // ===========================
-        // OFFLINE MANAGER - IndexedDB for Local Storage
-        // ===========================
-        const DB_NAME = 'RafaMedicaDB_V19';
-        const DB_VERSION = 1;
-        const STORES = {
-            inventory: 'inventory',
-            transactions: 'transactions',
-            purchases: 'purchases',
-            cashbook: 'cashbook',
-            settings: 'settings',
-            transfers: 'transfers',
-            metadata: 'metadata'
-        };
-
-        class OfflineManager {
-            constructor() {
-                this.db = null;
-                this.isOnline = navigator.onLine;
-                this.syncQueue = [];
-                this.initDB();
-                this.setupOnlineDetection();
-            }
-
-            async initDB() {
-                return new Promise((resolve, reject) => {
-                    const request = indexedDB.open(DB_NAME, DB_VERSION);
-                    
-                    request.onerror = () => reject(request.error);
-                    request.onsuccess = () => {
-                        this.db = request.result;
-                        console.log('✅ IndexedDB initialized for offline storage');
-                        resolve(this.db);
-                    };
-                    
-                    request.onupgradeneeded = (event) => {
-                        const db = event.target.result;
-                        
-                        // Create object stores
-                        Object.values(STORES).forEach(storeName => {
-                            if (!db.objectStoreNames.contains(storeName)) {
-                                const store = db.createObjectStore(storeName, { keyPath: 'id' });
-                                store.createIndex('timestamp', 'timestamp', { unique: false });
-                                if (storeName !== 'metadata' && storeName !== 'settings') {
-                                    store.createIndex('storeId', 'storeId', { unique: false });
-                                }
-                            }
-                        });
-                    };
-                });
-            }
-
-            setupOnlineDetection() {
-                window.addEventListener('online', () => {
-                    this.isOnline = true;
-                    console.log('🌐 Back online - data will sync automatically via Firebase');
-                    window.dispatchEvent(new CustomEvent('onlineStatusChanged', { detail: { isOnline: true } }));
-                });
-
-                window.addEventListener('offline', () => {
-                    this.isOnline = false;
-                    console.log('📴 Offline mode - using cached data');
-                    window.dispatchEvent(new CustomEvent('onlineStatusChanged', { detail: { isOnline: false } }));
-                });
-            }
-
-            async saveToLocal(storeName, data) {
-                if (!this.db) await this.initDB();
-                
-                return new Promise((resolve, reject) => {
-                    const transaction = this.db.transaction([storeName], 'readwrite');
-                    const store = transaction.objectStore(storeName);
-                    
-                    const dataWithMeta = {
-                        ...data,
-                        _localTimestamp: Date.now(),
-                        _synced: this.isOnline
-                    };
-                    
-                    const request = store.put(dataWithMeta);
-                    request.onsuccess = () => resolve(request.result);
-                    request.onerror = () => reject(request.error);
-                });
-            }
-
-            async getFromLocal(storeName, id = null) {
-                if (!this.db) await this.initDB();
-                
-                return new Promise((resolve, reject) => {
-                    const transaction = this.db.transaction([storeName], 'readonly');
-                    const store = transaction.objectStore(storeName);
-                    
-                    if (id) {
-                        const request = store.get(id);
-                        request.onsuccess = () => resolve(request.result);
-                        request.onerror = () => reject(request.error);
-                    } else {
-                        const request = store.getAll();
-                        request.onsuccess = () => resolve(request.result);
-                        request.onerror = () => reject(request.error);
-                    }
-                });
-            }
-
-            async getAllFromLocal(storeName) {
-                return this.getFromLocal(storeName);
-            }
-
-            async deleteFromLocal(storeName, id) {
-                if (!this.db) await this.initDB();
-                
-                return new Promise((resolve, reject) => {
-                    const transaction = this.db.transaction([storeName], 'readwrite');
-                    const store = transaction.objectStore(storeName);
-                    const request = store.delete(id);
-                    request.onsuccess = () => resolve();
-                    request.onerror = () => reject(request.error);
-                });
-            }
-
-            async saveMetadata(key, value) {
-                return this.saveToLocal(STORES.metadata, { id: key, value, timestamp: Date.now() });
-            }
-
-            async getMetadata(key) {
-                const result = await this.getFromLocal(STORES.metadata, key);
-                return result ? result.value : null;
-            }
-
-            getStatus() {
-                return {
-                    isOnline: this.isOnline,
-                    dbReady: !!this.db
-                };
-            }
-        }
-
-        // Initialize Offline Manager
-        window.offlineManager = new OfflineManager();
-        console.log('✅ Offline Manager ready');
-    </script>
-
-    <!-- Service Worker for Asset Caching -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            const swCode = `
-                const CACHE_NAME = 'rafa-medica-v19-assets';
-                const urlsToCache = [
-                    'https://cdn.tailwindcss.com',
-                    'https://unpkg.com/react@18/umd/react.production.min.js',
-                    'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-                    'https://unpkg.com/@babel/standalone/babel.min.js',
-                    'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-                    'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-                    'https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js'
-                ];
-
-                self.addEventListener('install', (event) => {
-                    event.waitUntil(
-                        caches.open(CACHE_NAME).then((cache) => {
-                            console.log('Caching app assets');
-                            return cache.addAll(urlsToCache).catch(err => {
-                                console.log('Cache addAll error:', err);
-                            });
-                        })
-                    );
-                    self.skipWaiting();
-                });
-
-                self.addEventListener('fetch', (event) => {
-                    event.respondWith(
-                        caches.match(event.request).then((response) => {
-                            return response || fetch(event.request).then((fetchResponse) => {
-                                return caches.open(CACHE_NAME).then((cache) => {
-                                    if (event.request.method === 'GET') {
-                                        cache.put(event.request, fetchResponse.clone());
-                                    }
-                                    return fetchResponse;
-                                });
-                            });
-                        }).catch(() => {
-                            return caches.match(event.request);
-                        })
-                    );
-                });
-
-                self.addEventListener('activate', (event) => {
-                    event.waitUntil(
-                        caches.keys().then((cacheNames) => {
-                            return Promise.all(
-                                cacheNames.map((cacheName) => {
-                                    if (cacheName !== CACHE_NAME) {
-                                        return caches.delete(cacheName);
-                                    }
-                                })
-                            );
-                        })
-                    );
-                });
-            `;
-
-            const blob = new Blob([swCode], { type: 'application/javascript' });
-            const swUrl = URL.createObjectURL(blob);
-            
-            navigator.serviceWorker.register(swUrl)
-                .then(reg => console.log('✅ Service Worker registered for asset caching'))
-                .catch(err => console.log('SW registration error:', err));
-        }
-    </script>
 </head>
 <body class="islamic-pattern relative">
     <div id="root" class="relative z-10"></div>
@@ -510,54 +269,6 @@
         };
 
         const Icon = React.memo(({ name, type = "solid", className = "" }) => <i className={`fa-${type} fa-${name} ${className}`}></i>);
-
-        // ===========================
-        // OFFLINE STATUS INDICATOR
-        // ===========================
-        const OfflineIndicator = () => {
-            const [isOnline, setIsOnline] = useState(navigator.onLine);
-            const [showIndicator, setShowIndicator] = useState(!navigator.onLine);
-
-            useEffect(() => {
-                const handleOnlineStatus = (e) => {
-                    setIsOnline(e.detail.isOnline);
-                    setShowIndicator(true);
-                    
-                    // Hide indicator after 3 seconds if online
-                    if (e.detail.isOnline) {
-                        setTimeout(() => setShowIndicator(false), 3000);
-                    }
-                };
-
-                window.addEventListener('onlineStatusChanged', handleOnlineStatus);
-
-                return () => {
-                    window.removeEventListener('onlineStatusChanged', handleOnlineStatus);
-                };
-            }, []);
-
-            if (!showIndicator) return null;
-
-            return (
-                <div className={`fixed top-4 right-4 z-[999] px-4 py-2.5 rounded-lg shadow-lg border-2 flex items-center gap-2 text-sm font-bold transition-all ${
-                    isOnline 
-                        ? 'bg-green-50 border-green-200 text-green-700'
-                        : 'bg-amber-50 border-amber-200 text-amber-700 pulse-offline'
-                } fade-in`}>
-                    {isOnline ? (
-                        <>
-                            <Icon name="wifi" className="text-green-600" />
-                            <span>Kembali Online</span>
-                        </>
-                    ) : (
-                        <>
-                            <Icon name="wifi-slash" className="text-amber-600" />
-                            <span>Mode Offline</span>
-                        </>
-                    )}
-                </div>
-            );
-        };
 
         // --- DEKORASI RAMADHAN ---
         const RamadhanDecor = () => (
@@ -2493,7 +2204,7 @@ Sisa : ${formatRupiah(remaining)}`;
 
             return (
                 <div className={`min-h-screen flex flex-col md:flex-row bg-sky-50/50 transition-colors duration-500 ${activeStoreId === 'all_stores' ? 'theme-all-stores' : ''}`}>
-                    <RamadhanDecor /> <OfflineIndicator /> <Toast show={toast.show} message={toast.message} type={toast.type} /> {isSidebarOpen && (<div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm fade-in" onClick={() => setIsSidebarOpen(false)}></div>)}
+                    <RamadhanDecor /> <Toast show={toast.show} message={toast.message} type={toast.type} /> {isSidebarOpen && (<div className="fixed inset-0 bg-slate-900/50 z-40 md:hidden backdrop-blur-sm fade-in" onClick={() => setIsSidebarOpen(false)}></div>)}
                     <NotificationCenter isOpen={showNotifications} onClose={() => setShowNotifications(false)} user={user} currentProfile={currentProfile} />
                     
                     {receiptToPrint && ( <div style={{ position: 'fixed', top: '-9999px', left: '-9999px', zIndex: -1 }}> <div id="receipt-hidden-container" className="bg-white p-6 w-[380px] text-black font-mono shadow-none" style={{ fontFamily: '"Courier New", Courier, monospace' }}> <div className="text-center mb-4"> <h2 className="text-xl font-bold uppercase">{receiptToPrint.storeName || APP_NAME}</h2> <p className="text-sm text-gray-600"> {receiptToPrint.storeAddress || "Indonesia"} </p> {(receiptToPrint.headers || []).map((h, i) => <p key={i} className="text-sm text-gray-600">{h}</p>)} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between text-xs mb-1"> <span>Tgl: {new Date(receiptToPrint.date.seconds ? receiptToPrint.date.toDate() : receiptToPrint.date).toLocaleString('id-ID')}</span> </div> <div className="flex justify-between text-xs mb-2"> <span>Ref: {receiptToPrint.id ? receiptToPrint.id.slice(-8).toUpperCase() : '-'}</span> <span>Kasir: {receiptToPrint.cashierName || 'Admin'}</span> </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="space-y-2 mb-4"> {receiptToPrint.items.map((item, idx) => { const validQty = item.cartQty - (item.returnedQty || 0); if (validQty <= 0) return null; return ( <div key={idx} className="text-sm"> <div className="font-bold">{item.name}</div> <div className="flex justify-between"> <span>{validQty} x {formatRupiah(item.price)}</span> <span>{formatRupiah(validQty * item.price)}</span> </div> </div> ); })} </div> <div className="border-b-2 border-dashed border-gray-300 my-2"></div> <div className="flex justify-between font-bold text-lg mb-1"> <span>TOTAL</span> <span>{formatRupiah(receiptToPrint.items.reduce((acc, item) => acc + (item.price * (item.cartQty - (item.returnedQty || 0))), 0))}</span> </div> {receiptToPrint.pay !== undefined && ( <div className="flex justify-between text-sm"> <span>Tunai</span> <span>{formatRupiah(receiptToPrint.pay)}</span> </div> )} {receiptToPrint.change !== undefined && ( <div className="flex justify-between text-sm"> <span>Kembali</span> <span>{formatRupiah(receiptToPrint.change)}</span> </div> )} <div className="border-b-2 border-dashed border-gray-300 my-4"></div> <div className="text-center text-xs text-gray-500 whitespace-pre-wrap"> {receiptToPrint.footer || "Terima Kasih\nBarang tidak dapat ditukar"} </div> {receiptToPrint.status === 'returned' && <div className="mt-4 text-center font-bold text-xl text-red-600 border-2 border-red-600 p-2 transform -rotate-12">TRANSAKSI DIBATALKAN</div>} {receiptToPrint.status === 'partial' && <div className="mt-4 text-center font-bold text-sm text-amber-600">*** ADA RETUR SEBAGIAN ***</div>} </div> </div> )}
@@ -2531,7 +2242,7 @@ Sisa : ${formatRupiah(remaining)}`;
                                 <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-2"><Icon name="xmark" className="text-xl" /></button>
                             </div>
                             <nav className="space-y-2 flex-1">{menuItems.map(menu => (<button key={menu.id} onClick={(e) => handleNavClick(menu.id, e)} className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all duration-300 relative overflow-hidden group ${activeTab === menu.id ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><Icon name={menu.icon} className={`w-5 text-base ${activeTab === menu.id ? 'text-white' : 'text-slate-400'}`} /> {menu.label}</button>))}</nav>
-                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 19 (Offline Mode)</p><p className="text-[9px] text-center text-green-500 font-bold mt-1">✓ Data tersimpan lokal</p></div>
+                            <div className="mt-auto pt-6 border-t border-slate-100"><p className="text-[10px] text-center text-slate-400">Versi 25.13 (Buku Kas Multi Expense)</p></div>
                         </div>
                     </aside>
                     <main className="flex-1 md:ml-0 p-4 md:p-8 max-w-7xl mx-auto w-full mb-0 relative z-20">
