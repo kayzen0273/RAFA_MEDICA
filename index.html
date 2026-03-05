@@ -1979,7 +1979,7 @@ Sisa : ${formatRupiah(remaining)}`;
                                                 const isSelisih = hasCount && selisih !== 0;
                                                 return (
                                                     <tr key={item.id} className={`hover:bg-slate-50/50 transition-colors ${isSelisih ? 'bg-red-50/30' : isOk ? 'bg-emerald-50/30' : ''}`}>
-                                                        <td className="px-4 py-3 font-semibold text-slate-700 max-w-[180px] truncate">{item.name}</td>
+                                                        <td className="px-4 py-3 font-semibold text-slate-700 whitespace-normal break-words">{item.name}</td>
                                                         <td className="px-4 py-3 text-slate-400 text-xs">{item.rack || '-'}</td>
                                                         <td className="px-4 py-3 text-center font-bold text-slate-600">{item.qty} <span className="text-[10px] text-slate-400">{item.unit}</span></td>
                                                         <td className="px-4 py-3 text-center">
