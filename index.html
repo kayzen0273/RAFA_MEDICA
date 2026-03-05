@@ -1610,6 +1610,55 @@ Sisa : ${formatRupiah(remaining)}`;
         };
 
         // ==================== STOCK OPNAME VIEW ====================
+
+        // Row di-memo agar hanya row yg berubah yg re-render, bukan seluruh tabel
+        const OpnameRow = React.memo(({ item, initialValue, onCommit }) => {
+            const [localVal, setLocalVal] = useState(initialValue !== undefined ? String(initialValue) : '');
+
+            // Sync jika initialValue berubah dari luar (misal load sesi)
+            const prevInit = React.useRef(initialValue);
+            useEffect(() => {
+                if (prevInit.current !== initialValue) {
+                    prevInit.current = initialValue;
+                    setLocalVal(initialValue !== undefined ? String(initialValue) : '');
+                }
+            }, [initialValue]);
+
+            const hasCount = localVal !== '';
+            const selisih = hasCount ? Number(localVal) - Number(item.qty) : null;
+            const isOk = hasCount && selisih === 0;
+            const isSelisih = hasCount && selisih !== 0;
+
+            const handleBlur = () => {
+                onCommit(item.id, localVal);
+            };
+
+            return (
+                <tr className={`transition-colors ${isSelisih ? 'bg-red-50/30' : isOk ? 'bg-emerald-50/30' : ''}`}>
+                    <td className="px-4 py-3 font-semibold text-slate-700 whitespace-normal break-words">{item.name}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs">{item.rack || '-'}</td>
+                    <td className="px-4 py-3 text-center font-bold text-slate-600">{item.qty} <span className="text-[10px] text-slate-400">{item.unit}</span></td>
+                    <td className="px-4 py-3 text-center">
+                        <input type="number" min="0"
+                            value={localVal}
+                            onChange={e => setLocalVal(e.target.value)}
+                            onBlur={handleBlur}
+                            placeholder="—"
+                            className={`w-24 text-center px-2 py-1.5 rounded-lg border text-sm font-bold outline-none transition-all ${isOk ? 'border-emerald-300 bg-emerald-50 text-emerald-700 focus:ring-emerald-200' : isSelisih ? 'border-red-300 bg-red-50 text-red-600 focus:ring-red-200' : 'border-slate-200 bg-slate-50 text-slate-700 focus:border-sky-400 focus:ring-sky-100'} focus:ring-2`}
+                        />
+                    </td>
+                    <td className={`px-4 py-3 text-center font-black text-base ${selisih === null ? 'text-slate-300' : selisih > 0 ? 'text-emerald-600' : selisih < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                        {selisih === null ? '—' : selisih > 0 ? `+${selisih}` : selisih}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                        {!hasCount && <span className="text-[10px] bg-slate-100 text-slate-400 font-bold px-2 py-1 rounded-full">Belum</span>}
+                        {isOk && <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full">Sesuai</span>}
+                        {isSelisih && <span className="text-[10px] bg-red-100 text-red-600 font-bold px-2 py-1 rounded-full">Selisih</span>}
+                    </td>
+                </tr>
+            );
+        });
+
         const StockOpnameView = ({ items, user, showToast, currentProfile }) => {
             const [physicalCounts, setPhysicalCounts] = useState({});
             const [sessions, setSessions] = useState([]);
@@ -1648,8 +1697,14 @@ Sisa : ${formatRupiah(remaining)}`;
                 }
             }, [sessions, profileId]);
 
+            // filteredItems TIDAK bergantung physicalCounts kecuali filter aktif (ok/selisih/belum)
+            // Sehingga saat mengetik angka (filter=all), tabel tidak re-render
+            const baseItems = useMemo(() => {
+                return items.filter(item => !currentProfile?.id || item.storeId === currentProfile.id || !item.storeId);
+            }, [items, currentProfile]);
+
             const filteredItems = useMemo(() => {
-                let list = items.filter(item => !currentProfile?.id || item.storeId === currentProfile.id || !item.storeId);
+                let list = baseItems;
                 if (searchQuery) {
                     const q = searchQuery.toLowerCase();
                     list = list.filter(i => i.name?.toLowerCase().includes(q) || i.rack?.toLowerCase().includes(q));
@@ -1658,14 +1713,13 @@ Sisa : ${formatRupiah(remaining)}`;
                 else if (filterStatus === 'selisih') list = list.filter(i => physicalCounts[i.id] !== undefined && Number(physicalCounts[i.id]) !== Number(i.qty));
                 else if (filterStatus === 'belum') list = list.filter(i => physicalCounts[i.id] === undefined);
                 return list;
-            }, [items, searchQuery, filterStatus, physicalCounts, currentProfile]);
+            }, [baseItems, searchQuery, filterStatus, physicalCounts]);
 
             const stats = useMemo(() => {
-                const all = items.filter(item => !currentProfile?.id || item.storeId === currentProfile.id || !item.storeId);
-                const counted = all.filter(i => physicalCounts[i.id] !== undefined);
+                const counted = baseItems.filter(i => physicalCounts[i.id] !== undefined);
                 const selisih = counted.filter(i => Number(physicalCounts[i.id]) !== Number(i.qty));
-                return { total: all.length, counted: counted.length, selisih: selisih.length, ok: counted.length - selisih.length };
-            }, [items, physicalCounts, currentProfile]);
+                return { total: baseItems.length, counted: counted.length, selisih: selisih.length, ok: counted.length - selisih.length };
+            }, [baseItems, physicalCounts]);
 
             const startSession = async () => {
                 setSaving(true);
@@ -1679,9 +1733,15 @@ Sisa : ${formatRupiah(remaining)}`;
                 setSaving(false);
             };
 
-            const handleCountChange = (itemId, val) => {
-                setPhysicalCounts(prev => ({ ...prev, [itemId]: val === '' ? undefined : val }));
-            };
+            // Dipanggil hanya saat onBlur — bukan setiap ketikan
+            const handleCountChange = useCallback((itemId, val) => {
+                setPhysicalCounts(prev => {
+                    const next = { ...prev };
+                    if (val === '' || val === undefined) delete next[itemId];
+                    else next[itemId] = val;
+                    return next;
+                });
+            }, []);
 
             const saveProgress = async () => {
                 if (!sessionId) return;
@@ -1971,36 +2031,14 @@ Sisa : ${formatRupiah(remaining)}`;
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
-                                            {filteredItems.map(item => {
-                                                const physical = physicalCounts[item.id];
-                                                const hasCount = physical !== undefined && physical !== '';
-                                                const selisih = hasCount ? Number(physical) - Number(item.qty) : null;
-                                                const isOk = hasCount && selisih === 0;
-                                                const isSelisih = hasCount && selisih !== 0;
-                                                return (
-                                                    <tr key={item.id} className={`hover:bg-slate-50/50 transition-colors ${isSelisih ? 'bg-red-50/30' : isOk ? 'bg-emerald-50/30' : ''}`}>
-                                                        <td className="px-4 py-3 font-semibold text-slate-700 whitespace-normal break-words">{item.name}</td>
-                                                        <td className="px-4 py-3 text-slate-400 text-xs">{item.rack || '-'}</td>
-                                                        <td className="px-4 py-3 text-center font-bold text-slate-600">{item.qty} <span className="text-[10px] text-slate-400">{item.unit}</span></td>
-                                                        <td className="px-4 py-3 text-center">
-                                                            <input type="number" min="0"
-                                                                value={physical !== undefined ? physical : ''}
-                                                                onChange={e => handleCountChange(item.id, e.target.value)}
-                                                                placeholder="—"
-                                                                className={`w-24 text-center px-2 py-1.5 rounded-lg border text-sm font-bold outline-none transition-all ${isOk ? 'border-emerald-300 bg-emerald-50 text-emerald-700 focus:ring-emerald-200' : isSelisih ? 'border-red-300 bg-red-50 text-red-600 focus:ring-red-200' : 'border-slate-200 bg-slate-50 text-slate-700 focus:border-sky-400 focus:ring-sky-100'} focus:ring-2`}
-                                                            />
-                                                        </td>
-                                                        <td className={`px-4 py-3 text-center font-black text-base ${selisih === null ? 'text-slate-300' : selisih > 0 ? 'text-emerald-600' : selisih < 0 ? 'text-red-500' : 'text-slate-400'}`}>
-                                                            {selisih === null ? '—' : selisih > 0 ? `+${selisih}` : selisih}
-                                                        </td>
-                                                        <td className="px-4 py-3 text-center">
-                                                            {!hasCount && <span className="text-[10px] bg-slate-100 text-slate-400 font-bold px-2 py-1 rounded-full">Belum</span>}
-                                                            {isOk && <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-full">Sesuai</span>}
-                                                            {isSelisih && <span className="text-[10px] bg-red-100 text-red-600 font-bold px-2 py-1 rounded-full">Selisih</span>}
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
+                                            {filteredItems.map(item => (
+                                                <OpnameRow
+                                                    key={item.id}
+                                                    item={item}
+                                                    initialValue={physicalCounts[item.id]}
+                                                    onCommit={handleCountChange}
+                                                />
+                                            ))}
                                         </tbody>
                                     </table>
                                     {filteredItems.length === 0 && <div className="text-center py-12 text-slate-400"><Icon name="box-open" className="text-3xl mb-2" /><p className="text-sm font-medium">Tidak ada barang ditemukan</p></div>}
