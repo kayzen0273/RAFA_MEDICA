@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V70 - Jurnal Penerimaan Kas)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V71 - Jurnal Pengeluaran Kas)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -5329,6 +5329,14 @@
             const [formPenjualan, setFormPenjualan]     = useState(''); // Kredit: Penjualan
             const [formSerbi, setFormSerbi]             = useState(''); // Kredit: Serba-Serbi
 
+            // Form state khusus Pengeluaran Kas (Jurnal)
+            const [formRef, setFormRef]                         = useState(''); // Ref.
+            const [formUtang, setFormUtang]                     = useState(''); // Debit: Utang
+            const [formPembelian, setFormPembelian]             = useState(''); // Debit: Pembelian
+            const [formAkunLainnya, setFormAkunLainnya]         = useState(''); // Debit: Akun Lainnya
+            const [formKasOut, setFormKasOut]                   = useState(''); // Kredit: Kas
+            const [formPotonganPembelian, setFormPotonganPembelian] = useState(''); // Kredit: Potongan Pembelian
+
             // Filter bulan
             const thisMonth = new Date().toISOString().slice(0, 7);
             const [filterMonth, setFilterMonth] = useState(thisMonth);
@@ -5359,7 +5367,7 @@
 
             const stats = React.useMemo(() => {
                 const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kas || b.amount), 0);
-                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.amount), 0);
+                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0);
                 return { inTotal, outTotal, net: inTotal - outTotal };
             }, [entries, filterMonth]);
 
@@ -5372,6 +5380,18 @@
                 serbi:    filteredAsc.reduce((a, b) => a + safeNumber(b.serbiSerbi), 0),
             }), [filteredAsc]);
 
+            // Data pengeluaran ascending untuk jurnal
+            const filteredOutAsc = [...entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
+
+            // Totals untuk footer jurnal pengeluaran
+            const jurnalTotalsOut = React.useMemo(() => ({
+                utang:             filteredOutAsc.reduce((a, b) => a + safeNumber(b.utang), 0),
+                pembelian:         filteredOutAsc.reduce((a, b) => a + safeNumber(b.pembelian), 0),
+                akunLainnya:       filteredOutAsc.reduce((a, b) => a + safeNumber(b.akunLainnya), 0),
+                kas:               filteredOutAsc.reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0),
+                potonganPembelian: filteredOutAsc.reduce((a, b) => a + safeNumber(b.potonganPembelian), 0),
+            }), [filteredOutAsc]);
+
             const formatBulanIndo = (ym) => {
                 if (!ym) return '';
                 const [y, m] = ym.split('-');
@@ -5380,10 +5400,12 @@
             };
 
             const resetInForm = () => { setFormKas(''); setFormPotongan(''); setFormPiutang(''); setFormPenjualan(''); setFormSerbi(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
+            const resetOutForm = () => { setFormRef(''); setFormUtang(''); setFormPembelian(''); setFormAkunLainnya(''); setFormKasOut(''); setFormPotonganPembelian(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
 
             const openAdd = () => {
                 setEditingId(null);
                 resetInForm();
+                resetOutForm();
                 setFormAmount(''); setFormCategory('');
                 setShowModal(true);
             };
@@ -5399,6 +5421,12 @@
                     setFormPenjualan(entry.penjualan != null ? String(entry.penjualan) : '');
                     setFormSerbi(entry.serbiSerbi != null ? String(entry.serbiSerbi) : '');
                 } else {
+                    setFormRef(entry.ref || '');
+                    setFormUtang(entry.utang != null ? String(entry.utang) : '');
+                    setFormPembelian(entry.pembelian != null ? String(entry.pembelian) : '');
+                    setFormAkunLainnya(entry.akunLainnya != null ? String(entry.akunLainnya) : '');
+                    setFormKasOut(entry.kasOut != null ? String(entry.kasOut) : String(entry.amount || ''));
+                    setFormPotonganPembelian(entry.potonganPembelian != null ? String(entry.potonganPembelian) : '');
                     setFormAmount(String(entry.amount));
                     setFormCategory(entry.category || '');
                 }
@@ -5430,10 +5458,23 @@
                         updatedAt: window.serverTimestamp()
                     };
                 } else {
-                    if (!formAmount) { showToast("Nominal wajib diisi!", "error"); setSubmitting(false); return; }
+                    const kasOut = safeNumber(formKasOut);
+                    const potonganPembelian = safeNumber(formPotonganPembelian);
+                    const utang = safeNumber(formUtang);
+                    const pembelian = safeNumber(formPembelian);
+                    const akunLainnya = safeNumber(formAkunLainnya);
+                    // Jika pakai format jurnal baru
+                    const totalDebitOut = utang + pembelian + akunLainnya;
+                    const totalKreditOut = kasOut + potonganPembelian;
+                    // amount = kasOut untuk backward compat (atau total kredit)
+                    const amountOut = kasOut || totalDebitOut || safeNumber(formAmount);
+                    if (amountOut === 0 && totalDebitOut === 0) { showToast("Isi minimal satu kolom jurnal!", "error"); setSubmitting(false); return; }
                     payload = {
                         type: 'out',
-                        amount: safeNumber(formAmount),
+                        amount: amountOut,
+                        ref: formRef,
+                        utang, pembelian, akunLainnya,
+                        kasOut, potonganPembelian,
                         description: formDesc,
                         category: formCategory,
                         date: formDate,
@@ -5599,51 +5640,82 @@
                         </div>
                     )}
 
-                    {/* ===== PENGELUARAN KAS - CARD LIST ===== */}
+                    {/* ===== PENGELUARAN KAS - JURNAL TABLE ===== */}
                     {!isIn && (
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <h3 className="font-bold text-slate-700 text-sm">
-                                    Daftar Pengeluaran Kas
-                                    <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black">{filtered.length} transaksi</span>
-                                </h3>
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            {/* Jurnal Header */}
+                            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-4 py-3 text-center">
+                                <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                <p className="text-red-100 font-bold text-xs mt-0.5">Jurnal Pengeluaran Kas</p>
+                                <p className="text-red-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
                             </div>
 
-                            {filtered.length === 0 && (
-                                <div className="bg-white p-10 rounded-2xl text-center border border-dashed border-slate-200">
-                                    <Icon name="receipt" className="text-4xl mb-3 text-red-200" />
-                                    <p className="text-slate-400 text-sm font-medium">Belum ada pengeluaran kas</p>
-                                    <p className="text-slate-300 text-xs mt-1">Tap tombol + untuk menambahkan</p>
-                                </div>
-                            )}
-
-                            {filtered.map(entry => (
-                                <div key={entry.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center gap-3 fade-in">
-                                    <div className="flex items-center gap-3 min-w-0">
-                                        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-red-100 text-red-600">
-                                            <Icon name="arrow-up" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="font-bold text-slate-800 text-sm truncate">{entry.description}</p>
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <p className="text-[10px] text-slate-400">{formatDateIndo(entry.date)}</p>
-                                                {entry.category && (
-                                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700">{entry.category}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="text-right flex-shrink-0">
-                                        <p className="font-black text-sm text-red-600">- {formatRupiah(entry.amount)}</p>
-                                        {!readOnly && (
-                                            <div className="flex gap-1 justify-end mt-1">
-                                                <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 text-[10px] p-1 transition-colors"><Icon name="pen-to-square" /></button>
-                                                <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1 transition-colors"><Icon name="trash" /></button>
-                                            </div>
+                            {/* Table scroll wrapper */}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[11px] border-collapse min-w-[680px]">
+                                    <thead>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Ref.</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-700 font-black" colSpan={3}>Debet</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={2}>Kredit</th>
+                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
+                                        </tr>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Utang</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Pembelian</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Akun Lainnya</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Kas</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Pot. Pembelian</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredOutAsc.length === 0 && (
+                                            <tr>
+                                                <td colSpan={readOnly ? 8 : 9} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                    Belum ada pengeluaran kas
+                                                </td>
+                                            </tr>
                                         )}
-                                    </div>
-                                </div>
-                            ))}
+                                        {filteredOutAsc.map((entry, idx) => (
+                                            <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-center text-slate-500">{entry.ref || ''}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.utang)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.pembelian)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.akunLainnya)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.kasOut != null ? entry.kasOut : entry.amount)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.potonganPembelian)}</td>
+                                                {!readOnly && (
+                                                    <td className="border border-slate-200 px-1 py-1 text-center">
+                                                        <div className="flex flex-col gap-0.5 items-center">
+                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                        </div>
+                                                    </td>
+                                                )}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {/* Footer totals */}
+                                    {filteredOutAsc.length > 0 && (
+                                        <tfoot>
+                                            <tr className="bg-gradient-to-r from-red-50 to-rose-50">
+                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.utang ? formatRupiah(jurnalTotalsOut.utang) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.pembelian ? formatRupiah(jurnalTotalsOut.pembelian) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.akunLainnya ? formatRupiah(jurnalTotalsOut.akunLainnya) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.kas)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotalsOut.potonganPembelian ? formatRupiah(jurnalTotalsOut.potonganPembelian) : '-'}</td>
+                                                {!readOnly && <td className="border border-slate-200"></td>}
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            </div>
                         </div>
                     )}
 
@@ -5747,18 +5819,64 @@
                                     {!isIn && (
                                         <>
                                             <div>
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nominal (Rp)</label>
-                                                <input type="number" placeholder="0" value={formAmount} onChange={e => setFormAmount(e.target.value)}
-                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold focus:outline-none focus:border-red-400" />
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Ref. (opsional)</label>
+                                                <input type="text" placeholder="No. referensi..." value={formRef} onChange={e => setFormRef(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400" />
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-red-100"></div>
+                                                <span className="text-[10px] font-black text-red-600 uppercase">Debet</span>
+                                                <div className="h-px flex-1 bg-red-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Utang</label>
+                                                    <input type="number" placeholder="0" value={formUtang} onChange={e => setFormUtang(e.target.value)}
+                                                        className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Pembelian</label>
+                                                    <input type="number" placeholder="0" value={formPembelian} onChange={e => setFormPembelian(e.target.value)}
+                                                        className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
+                                                </div>
                                             </div>
                                             <div>
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Kategori (opsional)</label>
-                                                <select value={formCategory} onChange={e => setFormCategory(e.target.value)}
-                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400">
-                                                    <option value="">-- Pilih Kategori --</option>
-                                                    {CATEGORIES_OUT.map(c => <option key={c} value={c}>{c}</option>)}
-                                                </select>
+                                                <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Akun Lainnya</label>
+                                                <input type="number" placeholder="0" value={formAkunLainnya} onChange={e => setFormAkunLainnya(e.target.value)}
+                                                    className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
                                             </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Kas</label>
+                                                    <input type="number" placeholder="0" value={formKasOut} onChange={e => setFormKasOut(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Pot. Pembelian</label>
+                                                    <input type="number" placeholder="0" value={formPotonganPembelian} onChange={e => setFormPotonganPembelian(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                            </div>
+                                            {/* Live balance check pengeluaran */}
+                                            {(formUtang || formPembelian || formAkunLainnya || formKasOut || formPotonganPembelian) && (() => {
+                                                const d = safeNumber(formUtang) + safeNumber(formPembelian) + safeNumber(formAkunLainnya);
+                                                const k = safeNumber(formKasOut) + safeNumber(formPotonganPembelian);
+                                                const ok = d === k && d > 0;
+                                                return (
+                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />
+                                                            Debet: {formatRupiah(d)}
+                                                        </span>
+                                                        <span>Kredit: {formatRupiah(k)}</span>
+                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
+                                                    </div>
+                                                );
+                                            })()}
                                         </>
                                     )}
 
