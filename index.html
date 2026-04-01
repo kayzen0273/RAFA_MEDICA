@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V69 - Menu Keuangan)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V70 - Jurnal Penerimaan Kas)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -5313,20 +5313,26 @@
             const [entries, setEntries] = useState([]);
             const [loading, setLoading] = useState(true);
 
-            // Form state
+            // Form state (shared)
             const [showModal, setShowModal] = useState(false);
             const [submitting, setSubmitting] = useState(false);
-            const [formAmount, setFormAmount] = useState('');
             const [formDesc, setFormDesc]     = useState('');
             const [formDate, setFormDate]     = useState(new Date().toISOString().slice(0, 10));
             const [formCategory, setFormCategory] = useState('');
+            const [formAmount, setFormAmount] = useState(''); // untuk pengeluaran
             const [editingId, setEditingId]   = useState(null);
+
+            // Form state khusus Penerimaan Kas (Jurnal)
+            const [formKas, setFormKas]                 = useState(''); // Debit: Kas
+            const [formPotongan, setFormPotongan]       = useState(''); // Debit: Potongan Penjualan
+            const [formPiutang, setFormPiutang]         = useState(''); // Kredit: Piutang
+            const [formPenjualan, setFormPenjualan]     = useState(''); // Kredit: Penjualan
+            const [formSerbi, setFormSerbi]             = useState(''); // Kredit: Serba-Serbi
 
             // Filter bulan
             const thisMonth = new Date().toISOString().slice(0, 7);
             const [filterMonth, setFilterMonth] = useState(thisMonth);
 
-            const CATEGORIES_IN  = ['Penjualan Tunai', 'Penjualan Non-Tunai', 'Setoran Modal', 'Piutang Diterima', 'Pendapatan Lain'];
             const CATEGORIES_OUT = ['Pembelian Obat', 'Gaji Karyawan', 'Listrik & Air', 'Sewa Tempat', 'ATK & Perlengkapan', 'Biaya Operasional', 'Pengeluaran Lain'];
 
             useEffect(() => {
@@ -5338,53 +5344,104 @@
                 );
                 const unsub = window.onSnapshot(q, (snapshot) => {
                     const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    const filtered = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
-                    setEntries(filtered);
+                    const data = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
+                    setEntries(data);
                     setLoading(false);
                 });
                 return () => unsub();
             }, [user, currentProfile]);
 
             const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
-            const categories  = activeSubTab === 'penerimaan' ? CATEGORIES_IN : CATEGORIES_OUT;
 
             const filtered = entries.filter(e => e.type === currentType && e.date && e.date.startsWith(filterMonth));
+            // Urutkan ascending untuk penerimaan (tampilan jurnal)
+            const filteredAsc = activeSubTab === 'penerimaan' ? [...filtered].sort((a, b) => a.date.localeCompare(b.date)) : filtered;
 
             const stats = React.useMemo(() => {
-                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.amount), 0);
+                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kas || b.amount), 0);
                 const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.amount), 0);
                 return { inTotal, outTotal, net: inTotal - outTotal };
             }, [entries, filterMonth]);
 
+            // Totals untuk footer jurnal penerimaan
+            const jurnalTotals = React.useMemo(() => ({
+                kas:      filteredAsc.reduce((a, b) => a + safeNumber(b.kas || b.amount), 0),
+                potongan: filteredAsc.reduce((a, b) => a + safeNumber(b.potonganPenjualan), 0),
+                piutang:  filteredAsc.reduce((a, b) => a + safeNumber(b.piutang), 0),
+                penjualan:filteredAsc.reduce((a, b) => a + safeNumber(b.penjualan), 0),
+                serbi:    filteredAsc.reduce((a, b) => a + safeNumber(b.serbiSerbi), 0),
+            }), [filteredAsc]);
+
+            const formatBulanIndo = (ym) => {
+                if (!ym) return '';
+                const [y, m] = ym.split('-');
+                const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+                return `${bulan[parseInt(m,10)-1]} ${y}`;
+            };
+
+            const resetInForm = () => { setFormKas(''); setFormPotongan(''); setFormPiutang(''); setFormPenjualan(''); setFormSerbi(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
+
             const openAdd = () => {
                 setEditingId(null);
-                setFormAmount(''); setFormDesc(''); setFormCategory('');
-                setFormDate(new Date().toISOString().slice(0, 10));
+                resetInForm();
+                setFormAmount(''); setFormCategory('');
                 setShowModal(true);
             };
 
             const openEdit = (entry) => {
                 setEditingId(entry.id);
-                setFormAmount(String(entry.amount));
-                setFormDesc(entry.description);
-                setFormCategory(entry.category || '');
                 setFormDate(entry.date);
+                setFormDesc(entry.description);
+                if (entry.type === 'in') {
+                    setFormKas(entry.kas != null ? String(entry.kas) : String(entry.amount || ''));
+                    setFormPotongan(entry.potonganPenjualan != null ? String(entry.potonganPenjualan) : '');
+                    setFormPiutang(entry.piutang != null ? String(entry.piutang) : '');
+                    setFormPenjualan(entry.penjualan != null ? String(entry.penjualan) : '');
+                    setFormSerbi(entry.serbiSerbi != null ? String(entry.serbiSerbi) : '');
+                } else {
+                    setFormAmount(String(entry.amount));
+                    setFormCategory(entry.category || '');
+                }
                 setShowModal(true);
             };
 
             const handleSubmit = async () => {
-                if (!formAmount || !formDesc || !formDate) { showToast("Lengkapi semua field!", "error"); return; }
+                if (!formDate || !formDesc) { showToast("Tanggal & keterangan wajib diisi!", "error"); return; }
                 setSubmitting(true);
-                const payload = {
-                    type: currentType,
-                    amount: safeNumber(formAmount),
-                    description: formDesc,
-                    category: formCategory,
-                    date: formDate,
-                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                    user: user.email,
-                    updatedAt: window.serverTimestamp()
-                };
+                let payload;
+                if (activeSubTab === 'penerimaan') {
+                    const kas = safeNumber(formKas);
+                    const potongan = safeNumber(formPotongan);
+                    const piutang = safeNumber(formPiutang);
+                    const penjualan = safeNumber(formPenjualan);
+                    const serbi = safeNumber(formSerbi);
+                    // Validasi: Debit = Kredit
+                    const totalDebit = kas + potongan;
+                    const totalKredit = piutang + penjualan + serbi;
+                    if (totalDebit === 0) { showToast("Isi minimal satu kolom Debit!", "error"); setSubmitting(false); return; }
+                    payload = {
+                        type: 'in',
+                        amount: kas, // backward compat
+                        kas, potonganPenjualan: potongan, piutang, penjualan, serbiSerbi: serbi,
+                        description: formDesc,
+                        date: formDate,
+                        storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                        user: user.email,
+                        updatedAt: window.serverTimestamp()
+                    };
+                } else {
+                    if (!formAmount) { showToast("Nominal wajib diisi!", "error"); setSubmitting(false); return; }
+                    payload = {
+                        type: 'out',
+                        amount: safeNumber(formAmount),
+                        description: formDesc,
+                        category: formCategory,
+                        date: formDate,
+                        storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                        user: user.email,
+                        updatedAt: window.serverTimestamp()
+                    };
+                }
                 try {
                     if (editingId) {
                         await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', editingId), payload);
@@ -5411,8 +5468,17 @@
 
             const isIn = activeSubTab === 'penerimaan';
 
+            // Format angka jurnal: kosong jika 0, rupiah jika ada
+            const fJurnal = (n) => n ? formatRupiah(n) : '';
+
+            // Tanggal singkat untuk jurnal (dd)
+            const fTglJurnal = (dateStr) => {
+                if (!dateStr) return '';
+                return dateStr.split('-')[2]; // ambil hanya tanggal
+            };
+
             return (
-                <div className="max-w-4xl mx-auto space-y-4 pb-28">
+                <div className="max-w-5xl mx-auto space-y-4 pb-28">
 
                     {/* Header */}
                     <div>
@@ -5450,58 +5516,136 @@
 
                     {/* Filter Bulan */}
                     <div className="flex items-center gap-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Filter Bulan:</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">Periode:</label>
                         <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
                             className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400" />
                     </div>
 
-                    {/* List */}
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <h3 className="font-bold text-slate-700 text-sm">
-                                {isIn ? 'Daftar Penerimaan Kas' : 'Daftar Pengeluaran Kas'}
-                                <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black">{filtered.length} transaksi</span>
-                            </h3>
-                        </div>
-
-                        {filtered.length === 0 && (
-                            <div className="bg-white p-10 rounded-2xl text-center border border-dashed border-slate-200">
-                                <Icon name={isIn ? "inbox" : "receipt"} className={`text-4xl mb-3 ${isIn ? 'text-emerald-200' : 'text-red-200'}`} />
-                                <p className="text-slate-400 text-sm font-medium">Belum ada {isIn ? 'penerimaan' : 'pengeluaran'} kas</p>
-                                <p className="text-slate-300 text-xs mt-1">Tap tombol + untuk menambahkan</p>
+                    {/* ===== PENERIMAAN KAS - JURNAL TABLE ===== */}
+                    {isIn && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            {/* Jurnal Header */}
+                            <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-center">
+                                <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                <p className="text-emerald-100 font-bold text-xs mt-0.5">Jurnal Penerimaan Kas</p>
+                                <p className="text-emerald-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
                             </div>
-                        )}
 
-                        {filtered.map(entry => (
-                            <div key={entry.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center gap-3 fade-in">
-                                <div className="flex items-center gap-3 min-w-0">
-                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${isIn ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                                        <Icon name={isIn ? "arrow-down" : "arrow-up"} />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="font-bold text-slate-800 text-sm truncate">{entry.description}</p>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <p className="text-[10px] text-slate-400">{formatDateIndo(entry.date)}</p>
-                                            {entry.category && (
-                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isIn ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{entry.category}</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                    <p className={`font-black text-sm ${isIn ? 'text-emerald-600' : 'text-red-600'}`}>
-                                        {isIn ? '+' : '-'} {formatRupiah(entry.amount)}
-                                    </p>
-                                    {!readOnly && (
-                                        <div className="flex gap-1 justify-end mt-1">
-                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 text-[10px] p-1 transition-colors"><Icon name="pen-to-square" /></button>
-                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1 transition-colors"><Icon name="trash" /></button>
-                                        </div>
+                            {/* Table scroll wrapper */}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
+                                    <thead>
+                                        <tr className="bg-slate-50">
+                                            {/* Grup header */}
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-700 font-black" colSpan={2}>Debit</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={3}>Kredit</th>
+                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
+                                        </tr>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Kas</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Pot. Penj.</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Piutang</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Penjualan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Serba-Serbi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredAsc.length === 0 && (
+                                            <tr>
+                                                <td colSpan={readOnly ? 7 : 8} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                    Belum ada penerimaan kas
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {filteredAsc.map((entry, idx) => (
+                                            <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.kas != null ? entry.kas : entry.amount)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.potonganPenjualan)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.piutang)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.penjualan)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.serbiSerbi)}</td>
+                                                {!readOnly && (
+                                                    <td className="border border-slate-200 px-1 py-1 text-center">
+                                                        <div className="flex flex-col gap-0.5 items-center">
+                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                        </div>
+                                                    </td>
+                                                )}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {/* Footer totals */}
+                                    {filteredAsc.length > 0 && (
+                                        <tfoot>
+                                            <tr className="bg-gradient-to-r from-emerald-50 to-green-50">
+                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{formatRupiah(jurnalTotals.kas)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{jurnalTotals.potongan ? formatRupiah(jurnalTotals.potongan) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.piutang ? formatRupiah(jurnalTotals.piutang) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.penjualan ? formatRupiah(jurnalTotals.penjualan) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.serbi ? formatRupiah(jurnalTotals.serbi) : '-'}</td>
+                                                {!readOnly && <td className="border border-slate-200"></td>}
+                                            </tr>
+                                        </tfoot>
                                     )}
-                                </div>
+                                </table>
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    )}
+
+                    {/* ===== PENGELUARAN KAS - CARD LIST ===== */}
+                    {!isIn && (
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <h3 className="font-bold text-slate-700 text-sm">
+                                    Daftar Pengeluaran Kas
+                                    <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black">{filtered.length} transaksi</span>
+                                </h3>
+                            </div>
+
+                            {filtered.length === 0 && (
+                                <div className="bg-white p-10 rounded-2xl text-center border border-dashed border-slate-200">
+                                    <Icon name="receipt" className="text-4xl mb-3 text-red-200" />
+                                    <p className="text-slate-400 text-sm font-medium">Belum ada pengeluaran kas</p>
+                                    <p className="text-slate-300 text-xs mt-1">Tap tombol + untuk menambahkan</p>
+                                </div>
+                            )}
+
+                            {filtered.map(entry => (
+                                <div key={entry.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center gap-3 fade-in">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 bg-red-100 text-red-600">
+                                            <Icon name="arrow-up" />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <p className="font-bold text-slate-800 text-sm truncate">{entry.description}</p>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <p className="text-[10px] text-slate-400">{formatDateIndo(entry.date)}</p>
+                                                {entry.category && (
+                                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700">{entry.category}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                        <p className="font-black text-sm text-red-600">- {formatRupiah(entry.amount)}</p>
+                                        {!readOnly && (
+                                            <div className="flex gap-1 justify-end mt-1">
+                                                <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 text-[10px] p-1 transition-colors"><Icon name="pen-to-square" /></button>
+                                                <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1 transition-colors"><Icon name="trash" /></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
                     {/* FAB */}
                     {!readOnly && (
@@ -5511,42 +5655,113 @@
                         </button>
                     )}
 
-                    {/* Modal Add/Edit */}
+                    {/* ===== MODAL ADD/EDIT ===== */}
                     {showModal && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm fade-in">
-                            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
+                            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
                                 {/* Modal Header */}
-                                <div className={`p-5 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
+                                <div className={`p-5 flex-shrink-0 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
                                     <h3 className="font-bold text-white text-base flex items-center gap-2">
                                         <Icon name={isIn ? "circle-arrow-down" : "circle-arrow-up"} />
                                         {editingId ? 'Edit' : 'Tambah'} {isIn ? 'Penerimaan Kas' : 'Pengeluaran Kas'}
                                     </h3>
+                                    {isIn && <p className="text-emerald-100 text-[10px] mt-1 font-medium">Isi kolom jurnal sesuai transaksi</p>}
                                 </div>
-                                {/* Modal Body */}
-                                <div className="p-5 space-y-3">
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
-                                        <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)}
-                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
+                                {/* Modal Body (scrollable) */}
+                                <div className="p-5 space-y-3 overflow-y-auto flex-1">
+                                    {/* Tanggal & Keterangan (semua tipe) */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
+                                            <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
+                                            <input type="text" placeholder="Mis: Penjualan tunai..." value={formDesc} onChange={e => setFormDesc(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nominal (Rp)</label>
-                                        <input type="number" placeholder="0" value={formAmount} onChange={e => setFormAmount(e.target.value)}
-                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold focus:outline-none focus:border-emerald-400" />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
-                                        <input type="text" placeholder="Tulis keterangan..." value={formDesc} onChange={e => setFormDesc(e.target.value)}
-                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Kategori (opsional)</label>
-                                        <select value={formCategory} onChange={e => setFormCategory(e.target.value)}
-                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400">
-                                            <option value="">-- Pilih Kategori --</option>
-                                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                                        </select>
-                                    </div>
+
+                                    {/* ---- PENERIMAAN KAS: KOLOM JURNAL ---- */}
+                                    {isIn && (
+                                        <>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-emerald-100"></div>
+                                                <span className="text-[10px] font-black text-emerald-600 uppercase">Debit</span>
+                                                <div className="h-px flex-1 bg-emerald-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Kas</label>
+                                                    <input type="number" placeholder="0" value={formKas} onChange={e => setFormKas(e.target.value)}
+                                                        className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Potongan Penjualan</label>
+                                                    <input type="number" placeholder="0" value={formPotongan} onChange={e => setFormPotongan(e.target.value)}
+                                                        className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Piutang</label>
+                                                    <input type="number" placeholder="0" value={formPiutang} onChange={e => setFormPiutang(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Penjualan</label>
+                                                    <input type="number" placeholder="0" value={formPenjualan} onChange={e => setFormPenjualan(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Serba-Serbi</label>
+                                                <input type="number" placeholder="0" value={formSerbi} onChange={e => setFormSerbi(e.target.value)}
+                                                    className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                            </div>
+                                            {/* Live balance check */}
+                                            {(formKas || formPotongan || formPiutang || formPenjualan || formSerbi) && (() => {
+                                                const d = safeNumber(formKas) + safeNumber(formPotongan);
+                                                const k = safeNumber(formPiutang) + safeNumber(formPenjualan) + safeNumber(formSerbi);
+                                                const ok = d === k && d > 0;
+                                                return (
+                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />
+                                                            Debit: {formatRupiah(d)}
+                                                        </span>
+                                                        <span>Kredit: {formatRupiah(k)}</span>
+                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </>
+                                    )}
+
+                                    {/* ---- PENGELUARAN KAS ---- */}
+                                    {!isIn && (
+                                        <>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nominal (Rp)</label>
+                                                <input type="number" placeholder="0" value={formAmount} onChange={e => setFormAmount(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold focus:outline-none focus:border-red-400" />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Kategori (opsional)</label>
+                                                <select value={formCategory} onChange={e => setFormCategory(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400">
+                                                    <option value="">-- Pilih Kategori --</option>
+                                                    {CATEGORIES_OUT.map(c => <option key={c} value={c}>{c}</option>)}
+                                                </select>
+                                            </div>
+                                        </>
+                                    )}
+
                                     <div className="flex gap-2 pt-2">
                                         <button onClick={() => setShowModal(false)}
                                             className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
