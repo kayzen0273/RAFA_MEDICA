@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V71 - Jurnal Pengeluaran Kas)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V72 - Jurnal Umum)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -5309,9 +5309,21 @@
 
         // --- KEUANGAN COMPONENT ---
         const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
-            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran'
+            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran' | 'jurnal_umum'
             const [entries, setEntries] = useState([]);
             const [loading, setLoading] = useState(true);
+
+            // ===== JURNAL UMUM STATE =====
+            const [juEntries, setJuEntries] = useState([]);
+            const [juLoading, setJuLoading] = useState(true);
+            const [showJuModal, setShowJuModal] = useState(false);
+            const [juSubmitting, setJuSubmitting] = useState(false);
+            const [juEditingId, setJuEditingId] = useState(null);
+            const [juFormDate, setJuFormDate] = useState(new Date().toISOString().slice(0, 10));
+            const [juFormLines, setJuFormLines] = useState([
+                { keterangan: '', debit: '', kredit: '' },
+                { keterangan: '', debit: '', kredit: '' },
+            ]);
 
             // Form state (shared)
             const [showModal, setShowModal] = useState(false);
@@ -5355,6 +5367,23 @@
                     const data = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
                     setEntries(data);
                     setLoading(false);
+                });
+                return () => unsub();
+            }, [user, currentProfile]);
+
+            // Listener Jurnal Umum
+            useEffect(() => {
+                if (!user) return;
+                const q = window.query(
+                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'),
+                    window.orderBy('date', 'desc'),
+                    window.limit(500)
+                );
+                const unsub = window.onSnapshot(q, (snapshot) => {
+                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    const data = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
+                    setJuEntries(data);
+                    setJuLoading(false);
                 });
                 return () => unsub();
             }, [user, currentProfile]);
@@ -5505,9 +5534,85 @@
                 } catch (err) { showToast("Gagal menghapus", "error"); }
             };
 
-            if (loading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
+            // ===== JURNAL UMUM FUNCTIONS =====
+            const juResetForm = () => {
+                setJuFormDate(new Date().toISOString().slice(0,10));
+                setJuFormLines([
+                    { keterangan: '', debit: '', kredit: '' },
+                    { keterangan: '', debit: '', kredit: '' },
+                ]);
+                setJuEditingId(null);
+            };
+
+            const juOpenAdd = () => {
+                juResetForm();
+                setShowJuModal(true);
+            };
+
+            const juOpenEdit = (entry) => {
+                setJuEditingId(entry.id);
+                setJuFormDate(entry.date);
+                setJuFormLines(entry.lines ? entry.lines.map(l => ({
+                    keterangan: l.keterangan || '',
+                    debit: l.debit ? String(l.debit) : '',
+                    kredit: l.kredit ? String(l.kredit) : '',
+                })) : [{ keterangan:'', debit:'', kredit:'' }]);
+                setShowJuModal(true);
+            };
+
+            const juHandleSubmit = async () => {
+                const validLines = juFormLines.filter(l => l.keterangan.trim() || safeNumber(l.debit) || safeNumber(l.kredit));
+                if (!juFormDate) { showToast("Tanggal wajib diisi!", "error"); return; }
+                if (validLines.length === 0) { showToast("Isi minimal satu baris jurnal!", "error"); return; }
+                const totalDebit  = validLines.reduce((a, l) => a + safeNumber(l.debit), 0);
+                const totalKredit = validLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
+                if (totalDebit !== totalKredit || totalDebit === 0) {
+                    showToast(`Debit (${formatRupiah(totalDebit)}) ≠ Kredit (${formatRupiah(totalKredit)}). Periksa kembali!`, "error");
+                    return;
+                }
+                setJuSubmitting(true);
+                const payload = {
+                    date: juFormDate,
+                    lines: validLines.map(l => ({
+                        keterangan: l.keterangan.trim(),
+                        debit: safeNumber(l.debit),
+                        kredit: safeNumber(l.kredit),
+                    })),
+                    totalDebit,
+                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                    user: user.email,
+                    updatedAt: window.serverTimestamp(),
+                };
+                try {
+                    if (juEditingId) {
+                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', juEditingId), payload);
+                        showToast("Jurnal umum diperbarui");
+                    } else {
+                        payload.createdAt = window.serverTimestamp();
+                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'), payload);
+                        showToast("Jurnal umum disimpan");
+                    }
+                    setShowJuModal(false);
+                } catch (err) { showToast("Gagal menyimpan", "error"); }
+                finally { setJuSubmitting(false); }
+            };
+
+            const juHandleDelete = async (id) => {
+                if (!confirm("Hapus entri jurnal umum ini?")) return;
+                try {
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', id));
+                    showToast("Data dihapus");
+                } catch (err) { showToast("Gagal menghapus", "error"); }
+            };
+
+            const juAddLine = () => setJuFormLines(prev => [...prev, { keterangan:'', debit:'', kredit:'' }]);
+            const juRemoveLine = (i) => setJuFormLines(prev => prev.filter((_, idx) => idx !== i));
+            const juUpdateLine = (i, field, val) => setJuFormLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
+
+            if (loading || juLoading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
 
             const isIn = activeSubTab === 'penerimaan';
+            const isJu = activeSubTab === 'jurnal_umum';
 
             // Format angka jurnal: kosong jika 0, rupiah jika ada
             const fJurnal = (n) => n ? formatRupiah(n) : '';
@@ -5552,6 +5657,9 @@
                         </button>
                         <button onClick={() => setActiveSubTab('pengeluaran')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400'}`}>
                             <Icon name="circle-arrow-up" /> Pengeluaran Kas
+                        </button>
+                        <button onClick={() => setActiveSubTab('jurnal_umum')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'jurnal_umum' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="book-open" /> Jurnal Umum
                         </button>
                     </div>
 
@@ -5719,13 +5827,184 @@
                         </div>
                     )}
 
+                    {/* ===== JURNAL UMUM TABLE ===== */}
+                    {isJu && (() => {
+                        const juFiltered = [...juEntries.filter(e => e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
+                        const juTotalDebit  = juFiltered.reduce((a, e) => a + safeNumber(e.totalDebit), 0);
+                        const juTotalKredit = juFiltered.reduce((a, e) => a + e.lines.reduce((s, l) => s + safeNumber(l.kredit), 0), 0);
+
+                        return (
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                                <div className="bg-gradient-to-r from-violet-600 to-purple-700 px-4 py-3 text-center">
+                                    <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                    <p className="text-violet-100 font-bold text-xs mt-0.5">Jurnal Umum</p>
+                                    <p className="text-violet-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-[11px] border-collapse min-w-[420px]">
+                                        <thead>
+                                            <tr className="bg-slate-50">
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold w-10">Tgl</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold">Keterangan</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-violet-700 font-black whitespace-nowrap">Debit</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black whitespace-nowrap">Kredit</th>
+                                                {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold w-8">•</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {juFiltered.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={readOnly ? 4 : 5} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                        <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                        Belum ada entri jurnal umum
+                                                    </td>
+                                                </tr>
+                                            )}
+                                            {juFiltered.map((entry, eIdx) => (
+                                                entry.lines && entry.lines.map((line, lIdx) => (
+                                                    <tr key={`${entry.id}-${lIdx}`} className={`hover:bg-violet-50/20 transition-colors ${eIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
+                                                            {lIdx === 0 ? fTglJurnal(entry.date) : ''}
+                                                        </td>
+                                                        <td className={`border border-slate-200 px-2 py-1.5 text-slate-700 ${lIdx > 0 ? 'pl-6' : ''}`}>
+                                                            {line.keterangan}
+                                                        </td>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-violet-700 whitespace-nowrap">
+                                                            {fJurnal(line.debit)}
+                                                        </td>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-sky-700 whitespace-nowrap">
+                                                            {fJurnal(line.kredit)}
+                                                        </td>
+                                                        {!readOnly && (
+                                                            <td className="border border-slate-200 px-1 py-1 text-center" rowSpan={lIdx === 0 ? entry.lines.length : undefined} style={{display: lIdx !== 0 ? 'none' : undefined}}>
+                                                                <div className="flex flex-col gap-0.5 items-center">
+                                                                    <button onClick={() => juOpenEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                                    <button onClick={() => juHandleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                ))
+                                            ))}
+                                        </tbody>
+                                        {juFiltered.length > 0 && (
+                                            <tfoot>
+                                                <tr className="bg-gradient-to-r from-violet-50 to-purple-50">
+                                                    <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                    <td className="border border-slate-200 px-2 py-2 text-right font-black text-violet-700 whitespace-nowrap">{formatRupiah(juTotalDebit)}</td>
+                                                    <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(juTotalKredit)}</td>
+                                                    {!readOnly && <td className="border border-slate-200"></td>}
+                                                </tr>
+                                            </tfoot>
+                                        )}
+                                    </table>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
                     {/* FAB */}
                     {!readOnly && (
-                        <button onClick={openAdd}
-                            className={`fixed bottom-24 md:bottom-10 right-6 ${isIn ? 'bg-emerald-600 shadow-emerald-300' : 'bg-red-600 shadow-red-300'} text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30 active:scale-95 transition-all`}>
+                        <button onClick={isJu ? juOpenAdd : openAdd}
+                            className={`fixed bottom-24 md:bottom-10 right-6 ${isJu ? 'bg-violet-600 shadow-violet-300' : isIn ? 'bg-emerald-600 shadow-emerald-300' : 'bg-red-600 shadow-red-300'} text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30 active:scale-95 transition-all`}>
                             <Icon name="plus" className="text-2xl" />
                         </button>
                     )}
+
+                    {/* ===== MODAL JURNAL UMUM ===== */}
+                    {showJuModal && (() => {
+                        const juLiveTotalDebit  = juFormLines.reduce((a, l) => a + safeNumber(l.debit), 0);
+                        const juLiveTotalKredit = juFormLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
+                        const juBalanced = juLiveTotalDebit > 0 && juLiveTotalDebit === juLiveTotalKredit;
+                        return (
+                            <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
+                                <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+                                    {/* Modal Header */}
+                                    <div className="p-5 flex-shrink-0 bg-gradient-to-r from-violet-600 to-purple-700">
+                                        <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                            <Icon name="book-open" />
+                                            {juEditingId ? 'Edit' : 'Tambah'} Jurnal Umum
+                                        </h3>
+                                        <p className="text-violet-200 text-[10px] mt-1 font-medium">Debit harus sama dengan Kredit</p>
+                                    </div>
+                                    {/* Modal Body */}
+                                    <div className="p-4 space-y-3 overflow-y-auto flex-1">
+                                        {/* Tanggal */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal Transaksi</label>
+                                            <input type="date" value={juFormDate} onChange={e => setJuFormDate(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-violet-400" />
+                                        </div>
+                                        {/* Baris jurnal */}
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-px flex-1 bg-violet-100"></div>
+                                                <span className="text-[10px] font-black text-violet-600 uppercase">Baris Jurnal</span>
+                                                <div className="h-px flex-1 bg-violet-100"></div>
+                                            </div>
+                                            {/* Header mini */}
+                                            <div className="grid grid-cols-[1fr_90px_90px_24px] gap-1 text-[9px] font-black text-slate-400 uppercase px-1">
+                                                <span>Keterangan / Akun</span>
+                                                <span className="text-center text-violet-600">Debit</span>
+                                                <span className="text-center text-sky-600">Kredit</span>
+                                                <span></span>
+                                            </div>
+                                            {juFormLines.map((line, i) => (
+                                                <div key={i} className="grid grid-cols-[1fr_90px_90px_24px] gap-1 items-center">
+                                                    <input
+                                                        type="text"
+                                                        placeholder={i === 0 ? "Mis: Kas..." : "Mis: Modal..."}
+                                                        value={line.keterangan}
+                                                        onChange={e => juUpdateLine(i, 'keterangan', e.target.value)}
+                                                        className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:border-violet-400 w-full"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="0"
+                                                        value={line.debit}
+                                                        onChange={e => juUpdateLine(i, 'debit', e.target.value)}
+                                                        className="p-2 bg-violet-50 border border-violet-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-violet-500 w-full"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="0"
+                                                        value={line.kredit}
+                                                        onChange={e => juUpdateLine(i, 'kredit', e.target.value)}
+                                                        className="p-2 bg-sky-50 border border-sky-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-sky-500 w-full"
+                                                    />
+                                                    <button onClick={() => juRemoveLine(i)} disabled={juFormLines.length <= 2} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-400 disabled:opacity-20 transition-colors text-xs">
+                                                        <Icon name="xmark" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            <button onClick={juAddLine} className="w-full py-2 border-2 border-dashed border-violet-200 text-violet-400 hover:border-violet-400 hover:text-violet-600 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1">
+                                                <Icon name="plus" /> Tambah Baris
+                                            </button>
+                                        </div>
+                                        {/* Live balance */}
+                                        {(juLiveTotalDebit > 0 || juLiveTotalKredit > 0) && (
+                                            <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${juBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                <span><Icon name={juBalanced ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(juLiveTotalDebit)}</span>
+                                                <span>Kredit: {formatRupiah(juLiveTotalKredit)}</span>
+                                                {!juBalanced && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(juLiveTotalDebit - juLiveTotalKredit))}</span>}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* Footer */}
+                                    <div className="p-4 flex gap-2 flex-shrink-0 border-t border-slate-100">
+                                        <button onClick={() => setShowJuModal(false)}
+                                            className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                                            Batal
+                                        </button>
+                                        <button onClick={juHandleSubmit} disabled={juSubmitting}
+                                            className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors">
+                                            {juSubmitting ? 'Menyimpan...' : (juEditingId ? 'Perbarui' : 'Simpan')}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {/* ===== MODAL ADD/EDIT ===== */}
                     {showModal && (
