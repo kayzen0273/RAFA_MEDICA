@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V68 - Fix Riwayat Setoran Unlimited)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V69 - Menu Keuangan)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -5300,6 +5300,264 @@
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- KEUANGAN COMPONENT ---
+        const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
+            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran'
+            const [entries, setEntries] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            // Form state
+            const [showModal, setShowModal] = useState(false);
+            const [submitting, setSubmitting] = useState(false);
+            const [formAmount, setFormAmount] = useState('');
+            const [formDesc, setFormDesc]     = useState('');
+            const [formDate, setFormDate]     = useState(new Date().toISOString().slice(0, 10));
+            const [formCategory, setFormCategory] = useState('');
+            const [editingId, setEditingId]   = useState(null);
+
+            // Filter bulan
+            const thisMonth = new Date().toISOString().slice(0, 7);
+            const [filterMonth, setFilterMonth] = useState(thisMonth);
+
+            const CATEGORIES_IN  = ['Penjualan Tunai', 'Penjualan Non-Tunai', 'Setoran Modal', 'Piutang Diterima', 'Pendapatan Lain'];
+            const CATEGORIES_OUT = ['Pembelian Obat', 'Gaji Karyawan', 'Listrik & Air', 'Sewa Tempat', 'ATK & Perlengkapan', 'Biaya Operasional', 'Pengeluaran Lain'];
+
+            useEffect(() => {
+                if (!user) return;
+                const q = window.query(
+                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'),
+                    window.orderBy('date', 'desc'),
+                    window.limit(300)
+                );
+                const unsub = window.onSnapshot(q, (snapshot) => {
+                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    const filtered = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
+                    setEntries(filtered);
+                    setLoading(false);
+                });
+                return () => unsub();
+            }, [user, currentProfile]);
+
+            const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
+            const categories  = activeSubTab === 'penerimaan' ? CATEGORIES_IN : CATEGORIES_OUT;
+
+            const filtered = entries.filter(e => e.type === currentType && e.date && e.date.startsWith(filterMonth));
+
+            const stats = React.useMemo(() => {
+                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.amount), 0);
+                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.amount), 0);
+                return { inTotal, outTotal, net: inTotal - outTotal };
+            }, [entries, filterMonth]);
+
+            const openAdd = () => {
+                setEditingId(null);
+                setFormAmount(''); setFormDesc(''); setFormCategory('');
+                setFormDate(new Date().toISOString().slice(0, 10));
+                setShowModal(true);
+            };
+
+            const openEdit = (entry) => {
+                setEditingId(entry.id);
+                setFormAmount(String(entry.amount));
+                setFormDesc(entry.description);
+                setFormCategory(entry.category || '');
+                setFormDate(entry.date);
+                setShowModal(true);
+            };
+
+            const handleSubmit = async () => {
+                if (!formAmount || !formDesc || !formDate) { showToast("Lengkapi semua field!", "error"); return; }
+                setSubmitting(true);
+                const payload = {
+                    type: currentType,
+                    amount: safeNumber(formAmount),
+                    description: formDesc,
+                    category: formCategory,
+                    date: formDate,
+                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                    user: user.email,
+                    updatedAt: window.serverTimestamp()
+                };
+                try {
+                    if (editingId) {
+                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', editingId), payload);
+                        showToast("Data berhasil diperbarui");
+                    } else {
+                        payload.createdAt = window.serverTimestamp();
+                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'), payload);
+                        showToast("Data berhasil disimpan");
+                    }
+                    setShowModal(false);
+                } catch (err) { showToast("Gagal menyimpan data", "error"); }
+                finally { setSubmitting(false); }
+            };
+
+            const handleDelete = async (id) => {
+                if (!confirm("Hapus data ini?")) return;
+                try {
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', id));
+                    showToast("Data dihapus");
+                } catch (err) { showToast("Gagal menghapus", "error"); }
+            };
+
+            if (loading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
+
+            const isIn = activeSubTab === 'penerimaan';
+
+            return (
+                <div className="max-w-4xl mx-auto space-y-4 pb-28">
+
+                    {/* Header */}
+                    <div>
+                        <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <Icon name="scale-balanced" className="text-emerald-600" /> Keuangan
+                        </h1>
+                        <p className="text-[10px] text-slate-500 font-bold">{currentProfile.name}</p>
+                    </div>
+
+                    {/* Summary Card */}
+                    <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-4 text-white shadow-lg shadow-green-200">
+                            <p className="text-green-100 text-[10px] font-bold uppercase mb-1">Penerimaan</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.inTotal)}</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-2xl p-4 text-white shadow-lg shadow-red-200">
+                            <p className="text-red-100 text-[10px] font-bold uppercase mb-1">Pengeluaran</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.outTotal)}</p>
+                        </div>
+                        <div className={`bg-gradient-to-br ${stats.net >= 0 ? 'from-sky-500 to-blue-600 shadow-blue-200' : 'from-orange-500 to-amber-600 shadow-orange-200'} rounded-2xl p-4 text-white shadow-lg`}>
+                            <p className="text-sky-100 text-[10px] font-bold uppercase mb-1">Selisih</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.net)}</p>
+                        </div>
+                    </div>
+
+                    {/* Sub-tab Switch */}
+                    <div className="flex bg-white p-1.5 rounded-xl shadow-sm border border-slate-100">
+                        <button onClick={() => setActiveSubTab('penerimaan')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'penerimaan' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="circle-arrow-down" /> Penerimaan Kas
+                        </button>
+                        <button onClick={() => setActiveSubTab('pengeluaran')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="circle-arrow-up" /> Pengeluaran Kas
+                        </button>
+                    </div>
+
+                    {/* Filter Bulan */}
+                    <div className="flex items-center gap-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">Filter Bulan:</label>
+                        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+                            className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400" />
+                    </div>
+
+                    {/* List */}
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <h3 className="font-bold text-slate-700 text-sm">
+                                {isIn ? 'Daftar Penerimaan Kas' : 'Daftar Pengeluaran Kas'}
+                                <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-black">{filtered.length} transaksi</span>
+                            </h3>
+                        </div>
+
+                        {filtered.length === 0 && (
+                            <div className="bg-white p-10 rounded-2xl text-center border border-dashed border-slate-200">
+                                <Icon name={isIn ? "inbox" : "receipt"} className={`text-4xl mb-3 ${isIn ? 'text-emerald-200' : 'text-red-200'}`} />
+                                <p className="text-slate-400 text-sm font-medium">Belum ada {isIn ? 'penerimaan' : 'pengeluaran'} kas</p>
+                                <p className="text-slate-300 text-xs mt-1">Tap tombol + untuk menambahkan</p>
+                            </div>
+                        )}
+
+                        {filtered.map(entry => (
+                            <div key={entry.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center gap-3 fade-in">
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${isIn ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                                        <Icon name={isIn ? "arrow-down" : "arrow-up"} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="font-bold text-slate-800 text-sm truncate">{entry.description}</p>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <p className="text-[10px] text-slate-400">{formatDateIndo(entry.date)}</p>
+                                            {entry.category && (
+                                                <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isIn ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{entry.category}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                    <p className={`font-black text-sm ${isIn ? 'text-emerald-600' : 'text-red-600'}`}>
+                                        {isIn ? '+' : '-'} {formatRupiah(entry.amount)}
+                                    </p>
+                                    {!readOnly && (
+                                        <div className="flex gap-1 justify-end mt-1">
+                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 text-[10px] p-1 transition-colors"><Icon name="pen-to-square" /></button>
+                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 text-[10px] p-1 transition-colors"><Icon name="trash" /></button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* FAB */}
+                    {!readOnly && (
+                        <button onClick={openAdd}
+                            className={`fixed bottom-24 md:bottom-10 right-6 ${isIn ? 'bg-emerald-600 shadow-emerald-300' : 'bg-red-600 shadow-red-300'} text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30 active:scale-95 transition-all`}>
+                            <Icon name="plus" className="text-2xl" />
+                        </button>
+                    )}
+
+                    {/* Modal Add/Edit */}
+                    {showModal && (
+                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm fade-in">
+                            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+                                {/* Modal Header */}
+                                <div className={`p-5 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
+                                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                        <Icon name={isIn ? "circle-arrow-down" : "circle-arrow-up"} />
+                                        {editingId ? 'Edit' : 'Tambah'} {isIn ? 'Penerimaan Kas' : 'Pengeluaran Kas'}
+                                    </h3>
+                                </div>
+                                {/* Modal Body */}
+                                <div className="p-5 space-y-3">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
+                                        <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nominal (Rp)</label>
+                                        <input type="number" placeholder="0" value={formAmount} onChange={e => setFormAmount(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold focus:outline-none focus:border-emerald-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
+                                        <input type="text" placeholder="Tulis keterangan..." value={formDesc} onChange={e => setFormDesc(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Kategori (opsional)</label>
+                                        <select value={formCategory} onChange={e => setFormCategory(e.target.value)}
+                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400">
+                                            <option value="">-- Pilih Kategori --</option>
+                                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="flex gap-2 pt-2">
+                                        <button onClick={() => setShowModal(false)}
+                                            className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                                            Batal
+                                        </button>
+                                        <button onClick={handleSubmit} disabled={submitting}
+                                            className={`flex-1 py-3 ${isIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'} text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors`}>
+                                            {submitting ? 'Menyimpan...' : (editingId ? 'Perbarui' : 'Simpan')}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -13413,6 +13671,7 @@
                 { id: 'list',        label: 'Stok Barang',       icon: 'boxes-stacked',       enabled: isOwner || showMenu('showMenuStock', settingsData.showMenuStock),        readOnly: !isOwner && !menuOn('enableStock', settingsData.enableStock) }, 
                 { id: 'stock_opname',label: 'Stock Opname',      icon: 'clipboard-check',     enabled: isOwner || showMenu('showMenuStockOpname', settingsData.showMenuStockOpname), readOnly: !isOwner && !menuOn('enableStockOpname', settingsData.enableStockOpname) },
                 { id: 'cashbook',    label: 'Buku Kas',          icon: 'book',                enabled: isOwner || showMenu('showMenuCashbook', settingsData.showMenuCashbook),  readOnly: !isOwner && !menuOn('enableCashbook', settingsData.enableCashbook) },
+                { id: 'keuangan',    label: 'Keuangan',          icon: 'scale-balanced',      enabled: isOwner || showMenu('showMenuKeuangan', settingsData.showMenuKeuangan),  readOnly: !isOwner && !menuOn('enableKeuangan', settingsData.enableKeuangan) },
                 { id: 'catatan',     label: 'Catatan',           icon: 'thumbtack',           enabled: isOwner || showMenu('showMenuCatatan', settingsData.showMenuCatatan),    readOnly: !isOwner && !menuOn('enableCatatan', settingsData.enableCatatan) },
                 { id: 'add',         label: 'Input Manual',      icon: 'pen-to-square',       enabled: isOwner || showMenu('showMenuAdd', settingsData.showMenuAdd),            readOnly: !isOwner && !menuOn('enableInputManual', settingsData.enableInputManual) }, 
                 { id: 'import',      label: 'Import Masal',      icon: 'file-import',         enabled: isOwner || showMenu('showMenuImport', settingsData.showMenuImport),      readOnly: !isOwner && !menuOn('enableImport', settingsData.enableImport) }, 
@@ -13730,6 +13989,7 @@
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} items={inventoryData} readOnly={menuItems.find(m=>m.id==='history')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} items={inventoryData} currentProfile={currentProfile} settings={settingsData} readOnly={menuItems.find(m=>m.id==='purchases')?.readOnly} />)}
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='cashbook')?.readOnly} />)}
+                        {activeTab === 'keuangan' && (<KeuanganView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='keuangan')?.readOnly} />)}
                         {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='list')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', costPrice:'', minStock: '', defaultDiscount: '', defaultDiscountType: '%'}); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='add')?.readOnly} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='import')?.readOnly} />)}
