@@ -4998,6 +4998,26 @@
             const [formDesc, setFormDesc] = useState('');
             const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
 
+            // Password Delete State
+            const [deletePasswordModal, setDeletePasswordModal] = useState({ show: false, id: null, type: null }); // type: 'operational' | 'revenue'
+            const [deletePassword, setDeletePassword] = useState('');
+            const [deletePasswordError, setDeletePasswordError] = useState('');
+            const [deleteCode, setDeleteCode] = useState('1234');
+
+            // Load delete code from Firestore
+            useEffect(() => {
+                const loadDeleteCode = async () => {
+                    try {
+                        const ref = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'system_codes', 'codes');
+                        const snap = await window.getDoc(ref);
+                        if (snap.exists() && snap.data().deleteCode) {
+                            setDeleteCode(snap.data().deleteCode);
+                        }
+                    } catch (e) {}
+                };
+                loadDeleteCode();
+            }, []);
+
             // Revenue Form State (UPDATED: expenses array)
             const [revForm, setRevForm] = useState({ 
                 date: new Date().toISOString().slice(0, 10), 
@@ -5073,9 +5093,54 @@
                 } catch (err) { showToast("Gagal menyimpan data", "error"); } finally { setSubmitting(false); }
             };
 
-            const handleOpDelete = async (id) => {
-                if(!confirm("Hapus transaksi ini?")) return;
-                try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow', id)); showToast("Transaksi dihapus"); } catch(err) { showToast("Gagal menghapus", "error"); }
+            // Delete Functions
+            const deleteOperational = async (id) => {
+                try { 
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'cashflow', id)); 
+                    showToast("Transaksi dihapus"); 
+                } catch(err) { 
+                    showToast("Gagal menghapus", "error"); 
+                }
+            };
+
+            const deleteRevenue = async (id) => {
+                try { 
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', id)); 
+                    showToast("Dihapus"); 
+                } catch(err) { 
+                    showToast("Gagal hapus", "error"); 
+                }
+            };
+
+            const openDeleteModal = (id, type) => {
+                setDeletePassword('');
+                setDeletePasswordError('');
+                setDeletePasswordModal({ show: true, id, type });
+            };
+
+            const handleConfirmDelete = () => {
+                if (deletePassword !== deleteCode) {
+                    setDeletePasswordError('Kata sandi salah!');
+                    return;
+                }
+                
+                if (deletePasswordModal.type === 'operational') {
+                    deleteOperational(deletePasswordModal.id);
+                } else if (deletePasswordModal.type === 'revenue') {
+                    deleteRevenue(deletePasswordModal.id);
+                }
+                
+                setDeletePasswordModal({ show: false, id: null, type: null });
+                setDeletePassword('');
+                setDeletePasswordError('');
+            };
+
+            const handleOpDelete = (id) => {
+                openDeleteModal(id, 'operational');
+            };
+
+            const handleRevDelete = (id) => {
+                openDeleteModal(id, 'revenue');
             };
 
             // ADD EXPENSE TO LIST
@@ -5133,11 +5198,6 @@
                     }
                     setRevForm(prev => ({ ...prev, total: '', deposited: '', expenses: [] }));
                 } catch(err) { showToast("Gagal simpan setoran", "error"); } finally { setIsRevSubmitting(false); }
-            };
-
-            const handleRevDelete = async (id) => {
-                if(!confirm("Hapus catatan setoran ini?")) return;
-                try { await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'daily_revenue', id)); showToast("Dihapus"); } catch(err) { showToast("Gagal hapus", "error"); }
             };
 
             // UPDATED COPY TO WA LOGIC
@@ -5300,6 +5360,39 @@
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ---- PASSWORD DELETE MODAL ---- */}
+                    {deletePasswordModal.show && (
+                        <div className="fixed inset-0 z-[600] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 fade-in" onClick={() => setDeletePasswordModal({ show: false, id: null, type: null })}>
+                            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xs pop-in" onClick={e => e.stopPropagation()}>
+                                <div className="text-center mb-5">
+                                    <div className="w-14 h-14 rounded-2xl bg-red-100 flex items-center justify-center mx-auto mb-3">
+                                        <Icon name="lock" className="text-red-500 text-xl" />
+                                    </div>
+                                    <h3 className="font-black text-slate-800 text-lg">Konfirmasi Hapus</h3>
+                                    <p className="text-slate-500 text-sm mt-1">Masukkan kata sandi untuk menghapus {deletePasswordModal.type === 'operational' ? 'transaksi kasir' : 'catatan setoran'} ini</p>
+                                </div>
+                                <div className="mb-4">
+                                    <input
+                                        type="password"
+                                        autoFocus
+                                        value={deletePassword}
+                                        onChange={e => { setDeletePassword(e.target.value); setDeletePasswordError(''); }}
+                                        onKeyDown={e => e.key === 'Enter' && handleConfirmDelete()}
+                                        placeholder="Kata sandi..."
+                                        className={`w-full px-4 py-3 rounded-xl border-2 text-center text-lg font-bold tracking-widest focus:outline-none transition-all ${deletePasswordError ? 'border-red-400 bg-red-50 focus:border-red-500' : 'border-slate-200 bg-slate-50 focus:border-red-400'}`}
+                                    />
+                                    {deletePasswordError && <p className="text-red-500 text-xs font-semibold text-center mt-2 flex items-center justify-center gap-1"><Icon name="circle-xmark" /> {deletePasswordError}</p>}
+                                </div>
+                                <div className="flex gap-3">
+                                    <button onClick={() => setDeletePasswordModal({ show: false, id: null, type: null })} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-600 font-bold text-sm hover:bg-slate-200 transition-all">Batal</button>
+                                    <button onClick={handleConfirmDelete} className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5">
+                                        <Icon name="trash" /> Hapus
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
