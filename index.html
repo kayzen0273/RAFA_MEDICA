@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V72 - Jurnal Umum)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V75 - Jurnal Gabungan)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -5401,7 +5401,7 @@
         };
 
         // --- KEUANGAN COMPONENT ---
-        const KeuanganView = ({ user, currentProfile, showToast, readOnly, settings }) => {
+        const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
             const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran' | 'jurnal_umum'
             const [entries, setEntries] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -5456,13 +5456,13 @@
                     window.limit(300)
                 );
                 const unsub = window.onSnapshot(q, (snapshot) => {
+                    // Keuangan: selalu tampilkan SEMUA toko (tidak difilter per profil)
                     const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    const data = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
-                    setEntries(data);
+                    setEntries(all);
                     setLoading(false);
                 });
                 return () => unsub();
-            }, [user, currentProfile]);
+            }, [user]);
 
             // Listener Jurnal Umum
             useEffect(() => {
@@ -5473,13 +5473,13 @@
                     window.limit(500)
                 );
                 const unsub = window.onSnapshot(q, (snapshot) => {
+                    // Jurnal Umum: selalu tampilkan SEMUA toko (tidak difilter per profil)
                     const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    const data = currentProfile.id === 'all_stores' ? all : all.filter(d => d.storeId === currentProfile.id);
-                    setJuEntries(data);
+                    setJuEntries(all);
                     setJuLoading(false);
                 });
                 return () => unsub();
-            }, [user, currentProfile]);
+            }, [user]);
 
             const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
 
@@ -5706,26 +5706,6 @@
 
             const isIn = activeSubTab === 'penerimaan';
             const isJu = activeSubTab === 'jurnal_umum';
-            const isAllStores = currentProfile.id === 'all_stores';
-
-            // Helper: dapatkan nama toko dari storeId
-            const getStoreName = (storeId) => {
-                const profs = settings?.storeProfiles || [];
-                const found = profs.find(p => p.id === storeId);
-                return found ? found.name : (storeId === 'default' ? 'Toko Utama' : storeId);
-            };
-
-            // Helper: group array by storeId (preserve insertion order)
-            const groupByStore = (arr) => {
-                const map = {};
-                const order = [];
-                arr.forEach(e => {
-                    const sid = e.storeId || 'default';
-                    if (!map[sid]) { map[sid] = []; order.push(sid); }
-                    map[sid].push(e);
-                });
-                return order.map(sid => ({ sid, name: getStoreName(sid), entries: map[sid] }));
-            };
 
             // Format angka jurnal: kosong jika 0, rupiah jika ada
             const fJurnal = (n) => n ? formatRupiah(n) : '';
@@ -5744,7 +5724,7 @@
                         <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                             <Icon name="scale-balanced" className="text-emerald-600" /> Keuangan
                         </h1>
-                        <p className="text-[10px] text-slate-500 font-bold">{currentProfile.name}</p>
+                        <p className="text-[10px] text-slate-500 font-bold">Semua Toko — Data Gabungan</p>
                     </div>
 
                     {/* Summary Card */}
@@ -5788,7 +5768,7 @@
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                             {/* Jurnal Header */}
                             <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
                                 <p className="text-emerald-100 font-bold text-xs mt-0.5">Jurnal Penerimaan Kas</p>
                                 <p className="text-emerald-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
                             </div>
@@ -5822,50 +5802,7 @@
                                                 </td>
                                             </tr>
                                         )}
-                                        {isAllStores ? groupByStore(filteredAsc).map(({ sid, name, entries: grp }) => {
-                                            const gTotals = {
-                                                kas: grp.reduce((a,b)=>a+safeNumber(b.kas!=null?b.kas:b.amount),0),
-                                                potongan: grp.reduce((a,b)=>a+safeNumber(b.potonganPenjualan),0),
-                                                piutang: grp.reduce((a,b)=>a+safeNumber(b.piutang),0),
-                                                penjualan: grp.reduce((a,b)=>a+safeNumber(b.penjualan),0),
-                                                serbi: grp.reduce((a,b)=>a+safeNumber(b.serbiSerbi),0),
-                                            };
-                                            return [
-                                                <tr key={`hdr-${sid}`} className="bg-emerald-50">
-                                                    <td colSpan={readOnly?7:8} className="border border-slate-200 px-3 py-1.5 font-black text-emerald-700 text-[10px] uppercase tracking-wide">
-                                                        <Icon name="store" className="mr-1.5 text-emerald-500" />{name}
-                                                    </td>
-                                                </tr>,
-                                                ...grp.map((entry, idx) => (
-                                                    <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx%2===0?'bg-white':'bg-slate-50/40'}`}>
-                                                        <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.kas!=null?entry.kas:entry.amount)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.potonganPenjualan)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.piutang)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.penjualan)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.serbiSerbi)}</td>
-                                                        {!readOnly && (
-                                                            <td className="border border-slate-200 px-1 py-1 text-center">
-                                                                <div className="flex flex-col gap-0.5 items-center">
-                                                                    <button onClick={()=>openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                                    <button onClick={()=>handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                                </div>
-                                                            </td>
-                                                        )}
-                                                    </tr>
-                                                )),
-                                                <tr key={`sub-${sid}`} className="bg-emerald-100/60">
-                                                    <td colSpan={2} className="border border-slate-200 px-2 py-1.5 font-black text-emerald-800 text-right text-[10px] uppercase">Subtotal {name}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-emerald-800 whitespace-nowrap">{gTotals.kas?formatRupiah(gTotals.kas):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-emerald-800 whitespace-nowrap">{gTotals.potongan?formatRupiah(gTotals.potongan):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{gTotals.piutang?formatRupiah(gTotals.piutang):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{gTotals.penjualan?formatRupiah(gTotals.penjualan):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{gTotals.serbi?formatRupiah(gTotals.serbi):'-'}</td>
-                                                    {!readOnly && <td className="border border-slate-200"></td>}
-                                                </tr>
-                                            ];
-                                        }) : filteredAsc.map((entry, idx) => (
+                                        {filteredAsc.map((entry, idx) => (
                                             <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
                                                 <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
@@ -5889,7 +5826,7 @@
                                     {filteredAsc.length > 0 && (
                                         <tfoot>
                                             <tr className="bg-gradient-to-r from-emerald-50 to-green-50">
-                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">{isAllStores ? 'Grand Total' : 'Total'}</td>
+                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{formatRupiah(jurnalTotals.kas)}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{jurnalTotals.potongan ? formatRupiah(jurnalTotals.potongan) : '-'}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.piutang ? formatRupiah(jurnalTotals.piutang) : '-'}</td>
@@ -5909,7 +5846,7 @@
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                             {/* Jurnal Header */}
                             <div className="bg-gradient-to-r from-red-600 to-rose-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
                                 <p className="text-red-100 font-bold text-xs mt-0.5">Jurnal Pengeluaran Kas</p>
                                 <p className="text-red-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
                             </div>
@@ -5943,51 +5880,7 @@
                                                 </td>
                                             </tr>
                                         )}
-                                        {isAllStores ? groupByStore(filteredOutAsc).map(({ sid, name, entries: grp }) => {
-                                            const gTotals = {
-                                                utang: grp.reduce((a,b)=>a+safeNumber(b.utang),0),
-                                                pembelian: grp.reduce((a,b)=>a+safeNumber(b.pembelian),0),
-                                                akunLainnya: grp.reduce((a,b)=>a+safeNumber(b.akunLainnya),0),
-                                                kas: grp.reduce((a,b)=>a+safeNumber(b.kasOut!=null?b.kasOut:b.amount),0),
-                                                potonganPembelian: grp.reduce((a,b)=>a+safeNumber(b.potonganPembelian),0),
-                                            };
-                                            return [
-                                                <tr key={`hdr-${sid}`} className="bg-red-50">
-                                                    <td colSpan={readOnly?8:9} className="border border-slate-200 px-3 py-1.5 font-black text-red-700 text-[10px] uppercase tracking-wide">
-                                                        <Icon name="store" className="mr-1.5 text-red-400" />{name}
-                                                    </td>
-                                                </tr>,
-                                                ...grp.map((entry, idx) => (
-                                                    <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx%2===0?'bg-white':'bg-slate-50/40'}`}>
-                                                        <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-center text-slate-500">{entry.ref||''}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.utang)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.pembelian)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.akunLainnya)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.kasOut!=null?entry.kasOut:entry.amount)}</td>
-                                                        <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.potonganPembelian)}</td>
-                                                        {!readOnly && (
-                                                            <td className="border border-slate-200 px-1 py-1 text-center">
-                                                                <div className="flex flex-col gap-0.5 items-center">
-                                                                    <button onClick={()=>openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                                    <button onClick={()=>handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                                </div>
-                                                            </td>
-                                                        )}
-                                                    </tr>
-                                                )),
-                                                <tr key={`sub-${sid}`} className="bg-red-100/60">
-                                                    <td colSpan={3} className="border border-slate-200 px-2 py-1.5 font-black text-red-800 text-right text-[10px] uppercase">Subtotal {name}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-red-800 whitespace-nowrap">{gTotals.utang?formatRupiah(gTotals.utang):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-red-800 whitespace-nowrap">{gTotals.pembelian?formatRupiah(gTotals.pembelian):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-red-800 whitespace-nowrap">{gTotals.akunLainnya?formatRupiah(gTotals.akunLainnya):'-'}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{formatRupiah(gTotals.kas)}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{gTotals.potonganPembelian?formatRupiah(gTotals.potonganPembelian):'-'}</td>
-                                                    {!readOnly && <td className="border border-slate-200"></td>}
-                                                </tr>
-                                            ];
-                                        }) : filteredOutAsc.map((entry, idx) => (
+                                        {filteredOutAsc.map((entry, idx) => (
                                             <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
                                                 <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
@@ -6012,7 +5905,7 @@
                                     {filteredOutAsc.length > 0 && (
                                         <tfoot>
                                             <tr className="bg-gradient-to-r from-red-50 to-rose-50">
-                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">{isAllStores ? 'Grand Total' : 'Total'}</td>
+                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.utang ? formatRupiah(jurnalTotalsOut.utang) : '-'}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.pembelian ? formatRupiah(jurnalTotalsOut.pembelian) : '-'}</td>
                                                 <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.akunLainnya ? formatRupiah(jurnalTotalsOut.akunLainnya) : '-'}</td>
@@ -6036,7 +5929,7 @@
                         return (
                             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                                 <div className="bg-gradient-to-r from-violet-600 to-purple-700 px-4 py-3 text-center">
-                                    <p className="text-white font-black text-sm tracking-wide uppercase">{currentProfile.name}</p>
+                                    <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
                                     <p className="text-violet-100 font-bold text-xs mt-0.5">Jurnal Umum</p>
                                     <p className="text-violet-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
                                 </div>
@@ -6060,41 +5953,7 @@
                                                     </td>
                                                 </tr>
                                             )}
-                                            {isAllStores ? groupByStore(juFiltered).map(({ sid, name, entries: grp }) => {
-                                                const gDebit  = grp.reduce((a,e)=>a+safeNumber(e.totalDebit),0);
-                                                const gKredit = grp.reduce((a,e)=>a+e.lines.reduce((s,l)=>s+safeNumber(l.kredit),0),0);
-                                                return [
-                                                    <tr key={`hdr-${sid}`} className="bg-violet-50">
-                                                        <td colSpan={readOnly?4:5} className="border border-slate-200 px-3 py-1.5 font-black text-violet-700 text-[10px] uppercase tracking-wide">
-                                                            <Icon name="store" className="mr-1.5 text-violet-400" />{name}
-                                                        </td>
-                                                    </tr>,
-                                                    ...grp.map((entry, eIdx) => (
-                                                        entry.lines && entry.lines.map((line, lIdx) => (
-                                                            <tr key={`${entry.id}-${lIdx}`} className={`hover:bg-violet-50/20 transition-colors ${eIdx%2===0?'bg-white':'bg-slate-50/30'}`}>
-                                                                <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">{lIdx===0?fTglJurnal(entry.date):''}</td>
-                                                                <td className={`border border-slate-200 px-2 py-1.5 text-slate-700 ${lIdx>0?'pl-6':''}`}>{line.keterangan}</td>
-                                                                <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-violet-700 whitespace-nowrap">{fJurnal(line.debit)}</td>
-                                                                <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(line.kredit)}</td>
-                                                                {!readOnly && (
-                                                                    <td className="border border-slate-200 px-1 py-1 text-center" rowSpan={lIdx===0?entry.lines.length:undefined} style={{display:lIdx!==0?'none':undefined}}>
-                                                                        <div className="flex flex-col gap-0.5 items-center">
-                                                                            <button onClick={()=>juOpenEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                                            <button onClick={()=>juHandleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                                        </div>
-                                                                    </td>
-                                                                )}
-                                                            </tr>
-                                                        ))
-                                                    )),
-                                                    <tr key={`sub-${sid}`} className="bg-violet-100/60">
-                                                        <td colSpan={2} className="border border-slate-200 px-2 py-1.5 font-black text-violet-800 text-right text-[10px] uppercase">Subtotal {name}</td>
-                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-violet-800 whitespace-nowrap">{formatRupiah(gDebit)}</td>
-                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-black text-sky-800 whitespace-nowrap">{formatRupiah(gKredit)}</td>
-                                                        {!readOnly && <td className="border border-slate-200"></td>}
-                                                    </tr>
-                                                ];
-                                            }) : juFiltered.map((entry, eIdx) => (
+                                            {juFiltered.map((entry, eIdx) => (
                                                 entry.lines && entry.lines.map((line, lIdx) => (
                                                     <tr key={`${entry.id}-${lIdx}`} className={`hover:bg-violet-50/20 transition-colors ${eIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
                                                         <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
@@ -6124,7 +5983,7 @@
                                         {juFiltered.length > 0 && (
                                             <tfoot>
                                                 <tr className="bg-gradient-to-r from-violet-50 to-purple-50">
-                                                    <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">{isAllStores ? 'Grand Total' : 'Total'}</td>
+                                                    <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
                                                     <td className="border border-slate-200 px-2 py-2 text-right font-black text-violet-700 whitespace-nowrap">{formatRupiah(juTotalDebit)}</td>
                                                     <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(juTotalKredit)}</td>
                                                     {!readOnly && <td className="border border-slate-200"></td>}
@@ -14835,7 +14694,7 @@
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} items={inventoryData} readOnly={menuItems.find(m=>m.id==='history')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} items={inventoryData} currentProfile={currentProfile} settings={settingsData} readOnly={menuItems.find(m=>m.id==='purchases')?.readOnly} />)}
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='cashbook')?.readOnly} />)}
-                        {activeTab === 'keuangan' && (<KeuanganView user={user} currentProfile={currentProfile} showToast={showToast} settings={settingsData} readOnly={menuItems.find(m=>m.id==='keuangan')?.readOnly} />)}
+                        {activeTab === 'keuangan' && (<KeuanganView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='keuangan')?.readOnly} />)}
                         {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='list')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', costPrice:'', minStock: '', defaultDiscount: '', defaultDiscountType: '%'}); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='add')?.readOnly} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='import')?.readOnly} />)}
