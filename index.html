@@ -3,7 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V70 - Catatan Barang dengan Tombol Info)</title>
+    <title>Apotek Rafa Medica</title>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0ea5e9">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Rafa Medica">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
+    <!-- Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('SW registered:', reg.scope))
+                    .catch(err => console.warn('SW registration failed:', err));
+            });
+        }
+    </script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -73,7 +93,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi dari User
         const userConfig = {
@@ -93,6 +113,15 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Aktifkan Offline Persistence (IndexedDB) — data tetap ada & bisa ditulis saat offline
+        enableIndexedDbPersistence(db).catch((err) => {
+            if (err.code === 'failed-precondition') {
+                console.warn('Offline persistence: multiple tabs open, persistence only enabled in one tab at a time.');
+            } else if (err.code === 'unimplemented') {
+                console.warn('Offline persistence: browser does not support IndexedDB.');
+            }
+        });
 
         // Expose ke window
         window.db = db;
@@ -10487,7 +10516,7 @@
                     <div className="bg-gradient-to-r from-night-900 to-sky-900 rounded-3xl p-5 md:p-6 text-white relative overflow-hidden shadow-2xl border border-slate-700 group">
                         <div className="absolute right-0 top-0 w-48 h-48 bg-gold-400 opacity-10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
                         <div className="relative z-10 flex items-center justify-between">
-                            <div><h3 className="font-bold text-xl md:text-2xl text-sky-300 mb-1 flex items-center gap-2"><Icon name="cash-register" className="text-sky-400" /> Sistem Kasir Apotek Rafa Medica</h3><p className="text-xs md:text-sm text-slate-300 font-medium opacity-90">Kelola toko lebih cepat, lebih mudah, lebih akurat ⚡</p><div className="mt-3 inline-flex items-center gap-2 bg-green-500/20 px-3 py-1 rounded-full backdrop-blur-sm border border-green-500/30"><div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div><span className="text-[10px] font-bold tracking-wide text-green-300">ONLINE (FIREBASE)</span></div></div>
+                            <div><h3 className="font-bold text-xl md:text-2xl text-sky-300 mb-1 flex items-center gap-2"><Icon name="cash-register" className="text-sky-400" /> Sistem Kasir Apotek Rafa Medica</h3><p className="text-xs md:text-sm text-slate-300 font-medium opacity-90">Kelola toko lebih cepat, lebih mudah, lebih akurat ⚡</p><div className="mt-3 inline-flex items-center gap-2 bg-green-500/20 px-3 py-1 rounded-full backdrop-blur-sm border border-green-500/30"><div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400 animate-pulse' : 'bg-amber-400'}`}></div><span className={`text-[10px] font-bold tracking-wide ${isOnline ? 'text-green-300' : 'text-amber-300'}`}>{isOnline ? 'ONLINE (FIREBASE)' : 'OFFLINE (DATA LOKAL)'}</span></div></div>
                             <div className="text-4xl text-sky-400/80 animate-pulse"><Icon name="store" /></div>
                         </div>
                     </div>
@@ -14819,6 +14848,29 @@
             });
             const [liveChangelog, setLiveChangelog] = useState(CHANGELOG);
 
+            // ===== ONLINE/OFFLINE STATE =====
+            const [isOnline, setIsOnline] = useState(navigator.onLine);
+            const [showOfflineBanner, setShowOfflineBanner] = useState(false);
+            const [justBackOnline, setJustBackOnline] = useState(false);
+            useEffect(() => {
+                const handleOnline = () => {
+                    setIsOnline(true);
+                    setShowOfflineBanner(false);
+                    setJustBackOnline(true);
+                    setTimeout(() => setJustBackOnline(false), 4000);
+                };
+                const handleOffline = () => {
+                    setIsOnline(false);
+                    setShowOfflineBanner(true);
+                };
+                window.addEventListener('online', handleOnline);
+                window.addEventListener('offline', handleOffline);
+                return () => {
+                    window.removeEventListener('online', handleOnline);
+                    window.removeEventListener('offline', handleOffline);
+                };
+            }, []);
+
             // Firestore real-time listener untuk changelog notifikasi (dari admin panel)
             React.useEffect(() => {
                 if (!window.db) return;
@@ -15662,6 +15714,26 @@
                                         onClick={() => setLightboxSrc(null)}
                                         style={{position:'absolute',top:'-12px',right:'-12px',width:'32px',height:'32px',background:'#ef4444',border:'none',borderRadius:'50%',color:'#fff',fontWeight:900,fontSize:'14px',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 2px 8px rgba(0,0,0,0.4)'}}
                                     >✕</button>
+                                </div>
+                            </div>
+                        )}
+                        {/* ===== BANNER OFFLINE / BACK ONLINE ===== */}
+                        {showOfflineBanner && (
+                            <div className="fixed top-0 left-0 right-0 z-[999] bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2.5 flex items-center gap-3 shadow-lg fade-in" style={{fontSize:'13px'}}>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M6.343 6.343a9 9 0 000 12.728M9.172 9.172a5 5 0 000 7.072M12 12h.01" /></svg>
+                                <div className="flex-1">
+                                    <span className="font-black">Sedang Offline</span>
+                                    <span className="font-medium opacity-90 ml-1">— Aplikasi tetap berjalan. Data yang diinput akan otomatis tersinkron saat internet kembali.</span>
+                                </div>
+                                <button onClick={() => setShowOfflineBanner(false)} className="text-white/70 hover:text-white text-lg font-bold ml-2">✕</button>
+                            </div>
+                        )}
+                        {justBackOnline && (
+                            <div className="fixed top-0 left-0 right-0 z-[999] bg-gradient-to-r from-emerald-500 to-green-600 text-white px-4 py-2.5 flex items-center gap-3 shadow-lg fade-in" style={{fontSize:'13px'}}>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                <div className="flex-1">
+                                    <span className="font-black">Kembali Online</span>
+                                    <span className="font-medium opacity-90 ml-1">— Semua data yang tertunda sedang disinkronkan ke server...</span>
                                 </div>
                             </div>
                         )}
