@@ -73,7 +73,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi dari User
         const userConfig = {
@@ -91,23 +91,15 @@
         
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        // ✅ OFFLINE MODE: Aktifkan Firestore offline persistence
-        // Semua data disimpan di browser (IndexedDB), transaksi offline otomatis sync saat online
-        enableIndexedDbPersistence(db).then(() => {
-            console.log('✅ Offline persistence aktif — CO bisa dilakukan tanpa internet');
-            window._offlinePersistenceReady = true;
-        }).catch((err) => {
-            if (err.code === 'failed-precondition') {
-                console.warn('⚠️ Offline mode hanya bisa aktif di 1 tab sekaligus');
-            } else if (err.code === 'unimplemented') {
-                console.warn('⚠️ Browser ini tidak mendukung offline mode');
-            } else {
-                console.warn('⚠️ Offline persistence error:', err);
-            }
+        // ✅ OFFLINE MODE: Gunakan initializeFirestore dengan persistentLocalCache
+        // Cara ini TIDAK ada masalah timing — aktif sebelum operasi apapun
+        // Mendukung MULTI-TAB dan semua fitur CO tetap jalan saat offline
+        const db = initializeFirestore(app, {
+            localCache: persistentLocalCache({
+                tabManager: persistentMultipleTabManager()
+            })
         });
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
         // Expose ke window
         window.db = db;
