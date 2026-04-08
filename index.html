@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V70 - Catatan Barang dengan Tombol Info)</title>
+    <title>Sistem Kasir Apotek Rafa Medica (V71 - Mode Offline dengan Sinkronisasi Otomatis)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -73,14 +73,14 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, serverTimestamp, writeBatch, query, orderBy, increment, limit, setDoc, getDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Konfigurasi dari User
         const userConfig = {
             apiKey: "AIzaSyCG8PQL8h2z8O5ebRW3_Mdm1ovgNSdUwC4",
             authDomain: "rafa-medica.firebaseapp.com",
-            projectId: "rafa-medica",
             databaseURL: "https://rafa-medica-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "rafa-medica",
             storageBucket: "rafa-medica.firebasestorage.app",
             messagingSenderId: "550088541296",
             appId: "1:550088541296:web:7b520c90d5c6723ebfe0b5",
@@ -91,14 +91,7 @@
         
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
-        // ✅ OFFLINE MODE: Gunakan initializeFirestore dengan persistentLocalCache
-        // Cara ini TIDAK ada masalah timing — aktif sebelum operasi apapun
-        // Mendukung MULTI-TAB dan semua fitur CO tetap jalan saat offline
-        const db = initializeFirestore(app, {
-            localCache: persistentLocalCache({
-                tabManager: persistentMultipleTabManager()
-            })
-        });
+        const db = getFirestore(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
         // Expose ke window
@@ -291,6 +284,24 @@
 
         // --- CHANGELOG / NOTIFIKASI UPDATE ---
         const CHANGELOG = [
+            {
+                id: 'v71_1',
+                version: 'v71',
+                date: '08 Apr 2026',
+                title: 'Mode Offline — Kasir Tanpa Internet',
+                tag: 'Fitur Baru',
+                tagColor: 'bg-amber-100 text-amber-700',
+                icon: 'plug',
+                isNew: true,
+                items: [
+                    '🔌 Tombol "Mode Offline" muncul di halaman kasir',
+                    '⚡ Saat tidak ada internet, klik Mode Offline → langsung ke keranjang belanja',
+                    '💾 Transaksi offline disimpan di perangkat (localStorage) dengan waktu CO aktual',
+                    '🔄 Saat kembali online, semua transaksi offline tersinkronkan otomatis ke Firebase',
+                    '🟡 Badge orange menunjukkan jumlah transaksi yang belum tersinkron',
+                    '📡 Indikator status koneksi (Online/Offline) muncul di banner toko',
+                ],
+            },
             {
                 id: 'v70_1',
                 version: 'v70',
@@ -545,7 +556,6 @@
             enableStock: true,
             enableStockOpname: true,
             enableCashbook: true,
-            enableKeuangan: true,
             enableCatatan: true,
             enableInputManual: true,
             enableImport: true,
@@ -557,7 +567,6 @@
             showMenuStock: true,
             showMenuStockOpname: true,
             showMenuCashbook: true,
-            showMenuKeuangan: true,
             showMenuCatatan: true,
             showMenuAdd: true,
             showMenuImport: true,
@@ -1729,7 +1738,6 @@
                 { key: 'enableStock', label: 'Stok Barang', icon: 'boxes-stacked', desc: 'Manajemen stok' },
                 { key: 'enableStockOpname', label: 'Stock Opname', icon: 'clipboard-check', desc: 'Penghitungan fisik stok' },
                 { key: 'enableCashbook', label: 'Buku Kas', icon: 'book', desc: 'Catatan keuangan' },
-                { key: 'enableKeuangan', label: 'Keuangan', icon: 'scale-balanced', desc: 'Jurnal penerimaan & pengeluaran kas' },
                 { key: 'enableCatatan', label: 'Catatan', icon: 'thumbtack', desc: 'Papan catatan' },
                 { key: 'enableInputManual', label: 'Input Manual', icon: 'pen-to-square', desc: 'Tambah/edit barang' },
                 { key: 'enableImport', label: 'Import Masal', icon: 'file-import', desc: 'Import data Excel' },
@@ -1755,7 +1763,6 @@
                 { key: 'showMenuStock', label: 'Stok Barang', icon: 'boxes-stacked', desc: 'Tampilkan stok barang' },
                 { key: 'showMenuStockOpname', label: 'Stock Opname', icon: 'clipboard-check', desc: 'Tampilkan stock opname' },
                 { key: 'showMenuCashbook', label: 'Buku Kas', icon: 'book', desc: 'Tampilkan buku kas' },
-                { key: 'showMenuKeuangan', label: 'Keuangan', icon: 'scale-balanced', desc: 'Tampilkan menu keuangan (jurnal)' },
                 { key: 'showMenuCatatan', label: 'Catatan', icon: 'thumbtack', desc: 'Tampilkan catatan' },
                 { key: 'showMenuAdd', label: 'Input Manual', icon: 'pen-to-square', desc: 'Tampilkan input manual' },
                 { key: 'showMenuImport', label: 'Import Masal', icon: 'file-import', desc: 'Tampilkan import masal' },
@@ -5797,754 +5804,6 @@
             );
         };
 
-        // --- KEUANGAN COMPONENT ---
-        const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
-            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran' | 'jurnal_umum'
-            const [entries, setEntries] = useState([]);
-            const [loading, setLoading] = useState(true);
-
-            // ===== JURNAL UMUM STATE =====
-            const [juEntries, setJuEntries] = useState([]);
-            const [juLoading, setJuLoading] = useState(true);
-            const [showJuModal, setShowJuModal] = useState(false);
-            const [juSubmitting, setJuSubmitting] = useState(false);
-            const [juEditingId, setJuEditingId] = useState(null);
-            const [juFormDate, setJuFormDate] = useState(new Date().toISOString().slice(0, 10));
-            const [juFormLines, setJuFormLines] = useState([
-                { keterangan: '', debit: '', kredit: '' },
-                { keterangan: '', debit: '', kredit: '' },
-            ]);
-
-            // Form state (shared)
-            const [showModal, setShowModal] = useState(false);
-            const [submitting, setSubmitting] = useState(false);
-            const [formDesc, setFormDesc]     = useState('');
-            const [formDate, setFormDate]     = useState(new Date().toISOString().slice(0, 10));
-            const [formCategory, setFormCategory] = useState('');
-            const [formAmount, setFormAmount] = useState('');
-            const [editingId, setEditingId]   = useState(null);
-
-            // Form state khusus Penerimaan Kas (Jurnal)
-            const [formKas, setFormKas]                 = useState('');
-            const [formPotongan, setFormPotongan]       = useState('');
-            const [formPiutang, setFormPiutang]         = useState('');
-            const [formPenjualan, setFormPenjualan]     = useState('');
-            const [formSerbi, setFormSerbi]             = useState('');
-
-            // Form state khusus Pengeluaran Kas (Jurnal)
-            const [formRef, setFormRef]                         = useState('');
-            const [formUtang, setFormUtang]                     = useState('');
-            const [formPembelian, setFormPembelian]             = useState('');
-            const [formAkunLainnya, setFormAkunLainnya]         = useState('');
-            const [formKasOut, setFormKasOut]                   = useState('');
-            const [formPotonganPembelian, setFormPotonganPembelian] = useState('');
-
-            // Filter bulan
-            const thisMonth = new Date().toISOString().slice(0, 7);
-            const [filterMonth, setFilterMonth] = useState(thisMonth);
-
-            const CATEGORIES_OUT = ['Pembelian Obat', 'Gaji Karyawan', 'Listrik & Air', 'Sewa Tempat', 'ATK & Perlengkapan', 'Biaya Operasional', 'Pengeluaran Lain'];
-
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(300)
-                );
-                const unsub = window.onSnapshot(q, (snapshot) => {
-                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setEntries(all);
-                    setLoading(false);
-                });
-                return () => unsub();
-            }, [user]);
-
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(500)
-                );
-                const unsub = window.onSnapshot(q, (snapshot) => {
-                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setJuEntries(all);
-                    setJuLoading(false);
-                });
-                return () => unsub();
-            }, [user]);
-
-            const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
-            const filtered = entries.filter(e => e.type === currentType && e.date && e.date.startsWith(filterMonth));
-            const filteredAsc = activeSubTab === 'penerimaan' ? [...filtered].sort((a, b) => a.date.localeCompare(b.date)) : filtered;
-
-            const stats = React.useMemo(() => {
-                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kas || b.amount), 0);
-                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0);
-                return { inTotal, outTotal, net: inTotal - outTotal };
-            }, [entries, filterMonth]);
-
-            const jurnalTotals = React.useMemo(() => ({
-                kas:      filteredAsc.reduce((a, b) => a + safeNumber(b.kas || b.amount), 0),
-                potongan: filteredAsc.reduce((a, b) => a + safeNumber(b.potonganPenjualan), 0),
-                piutang:  filteredAsc.reduce((a, b) => a + safeNumber(b.piutang), 0),
-                penjualan:filteredAsc.reduce((a, b) => a + safeNumber(b.penjualan), 0),
-                serbi:    filteredAsc.reduce((a, b) => a + safeNumber(b.serbiSerbi), 0),
-            }), [filteredAsc]);
-
-            const filteredOutAsc = [...entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
-
-            const jurnalTotalsOut = React.useMemo(() => ({
-                utang:             filteredOutAsc.reduce((a, b) => a + safeNumber(b.utang), 0),
-                pembelian:         filteredOutAsc.reduce((a, b) => a + safeNumber(b.pembelian), 0),
-                akunLainnya:       filteredOutAsc.reduce((a, b) => a + safeNumber(b.akunLainnya), 0),
-                kas:               filteredOutAsc.reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0),
-                potonganPembelian: filteredOutAsc.reduce((a, b) => a + safeNumber(b.potonganPembelian), 0),
-            }), [filteredOutAsc]);
-
-            const formatBulanIndo = (ym) => {
-                if (!ym) return '';
-                const [y, m] = ym.split('-');
-                const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-                return `${bulan[parseInt(m,10)-1]} ${y}`;
-            };
-
-            const resetInForm = () => { setFormKas(''); setFormPotongan(''); setFormPiutang(''); setFormPenjualan(''); setFormSerbi(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
-            const resetOutForm = () => { setFormRef(''); setFormUtang(''); setFormPembelian(''); setFormAkunLainnya(''); setFormKasOut(''); setFormPotonganPembelian(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
-
-            const openAdd = () => {
-                setEditingId(null);
-                resetInForm();
-                resetOutForm();
-                setFormAmount(''); setFormCategory('');
-                setShowModal(true);
-            };
-
-            const openEdit = (entry) => {
-                setEditingId(entry.id);
-                setFormDate(entry.date);
-                setFormDesc(entry.description);
-                if (entry.type === 'in') {
-                    setFormKas(entry.kas != null ? String(entry.kas) : String(entry.amount || ''));
-                    setFormPotongan(entry.potonganPenjualan ? String(entry.potonganPenjualan) : '');
-                    setFormPiutang(entry.piutang ? String(entry.piutang) : '');
-                    setFormPenjualan(entry.penjualan ? String(entry.penjualan) : '');
-                    setFormSerbi(entry.serbiSerbi ? String(entry.serbiSerbi) : '');
-                } else {
-                    setFormRef(entry.ref || '');
-                    setFormUtang(entry.utang ? String(entry.utang) : '');
-                    setFormPembelian(entry.pembelian ? String(entry.pembelian) : '');
-                    setFormAkunLainnya(entry.akunLainnya ? String(entry.akunLainnya) : '');
-                    setFormKasOut(entry.kasOut != null ? String(entry.kasOut) : String(entry.amount || ''));
-                    setFormPotonganPembelian(entry.potonganPembelian ? String(entry.potonganPembelian) : '');
-                }
-                setShowModal(true);
-            };
-
-            const handleSubmit = async () => {
-                if (!formDate) { showToast("Tanggal wajib diisi!", "error"); return; }
-                setSubmitting(true);
-                let payload = {
-                    date: formDate,
-                    description: formDesc,
-                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                    user: user.email,
-                    updatedAt: window.serverTimestamp(),
-                };
-                if (activeSubTab === 'penerimaan') {
-                    payload.type = 'in';
-                    payload.kas = safeNumber(formKas);
-                    payload.potonganPenjualan = safeNumber(formPotongan);
-                    payload.piutang = safeNumber(formPiutang);
-                    payload.penjualan = safeNumber(formPenjualan);
-                    payload.serbiSerbi = safeNumber(formSerbi);
-                    payload.amount = safeNumber(formKas);
-                } else {
-                    payload.type = 'out';
-                    payload.ref = formRef;
-                    payload.utang = safeNumber(formUtang);
-                    payload.pembelian = safeNumber(formPembelian);
-                    payload.akunLainnya = safeNumber(formAkunLainnya);
-                    payload.kasOut = safeNumber(formKasOut);
-                    payload.potonganPembelian = safeNumber(formPotonganPembelian);
-                    payload.amount = safeNumber(formKasOut);
-                }
-                try {
-                    if (editingId) {
-                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', editingId), payload);
-                        showToast("Data diperbarui");
-                    } else {
-                        payload.createdAt = window.serverTimestamp();
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'), payload);
-                        showToast("Data berhasil disimpan");
-                    }
-                    setShowModal(false);
-                } catch (err) { showToast("Gagal menyimpan data", "error"); }
-                finally { setSubmitting(false); }
-            };
-
-            const handleDelete = async (id) => {
-                if (!confirm("Hapus data ini?")) return;
-                try {
-                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', id));
-                    showToast("Data dihapus");
-                } catch (err) { showToast("Gagal menghapus", "error"); }
-            };
-
-            const juResetForm = () => {
-                setJuFormDate(new Date().toISOString().slice(0,10));
-                setJuFormLines([
-                    { keterangan: '', debit: '', kredit: '' },
-                    { keterangan: '', debit: '', kredit: '' },
-                ]);
-                setJuEditingId(null);
-            };
-
-            const juOpenAdd = () => { juResetForm(); setShowJuModal(true); };
-
-            const juOpenEdit = (entry) => {
-                setJuEditingId(entry.id);
-                setJuFormDate(entry.date);
-                setJuFormLines(entry.lines ? entry.lines.map(l => ({
-                    keterangan: l.keterangan || '',
-                    debit: l.debit ? String(l.debit) : '',
-                    kredit: l.kredit ? String(l.kredit) : '',
-                })) : [{ keterangan:'', debit:'', kredit:'' }]);
-                setShowJuModal(true);
-            };
-
-            const juHandleSubmit = async () => {
-                const validLines = juFormLines.filter(l => l.keterangan.trim() || safeNumber(l.debit) || safeNumber(l.kredit));
-                if (!juFormDate) { showToast("Tanggal wajib diisi!", "error"); return; }
-                if (validLines.length === 0) { showToast("Isi minimal satu baris jurnal!", "error"); return; }
-                const totalDebit  = validLines.reduce((a, l) => a + safeNumber(l.debit), 0);
-                const totalKredit = validLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
-                if (totalDebit !== totalKredit || totalDebit === 0) {
-                    showToast(`Debit (${formatRupiah(totalDebit)}) ≠ Kredit (${formatRupiah(totalKredit)}). Periksa kembali!`, "error");
-                    return;
-                }
-                setJuSubmitting(true);
-                const payload = {
-                    date: juFormDate,
-                    lines: validLines.map(l => ({
-                        keterangan: l.keterangan.trim(),
-                        debit: safeNumber(l.debit),
-                        kredit: safeNumber(l.kredit),
-                    })),
-                    totalDebit,
-                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                    user: user.email,
-                    updatedAt: window.serverTimestamp(),
-                };
-                try {
-                    if (juEditingId) {
-                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', juEditingId), payload);
-                        showToast("Jurnal umum diperbarui");
-                    } else {
-                        payload.createdAt = window.serverTimestamp();
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'), payload);
-                        showToast("Jurnal umum disimpan");
-                    }
-                    setShowJuModal(false);
-                } catch (err) { showToast("Gagal menyimpan", "error"); }
-                finally { setJuSubmitting(false); }
-            };
-
-            const juHandleDelete = async (id) => {
-                if (!confirm("Hapus entri jurnal umum ini?")) return;
-                try {
-                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', id));
-                    showToast("Data dihapus");
-                } catch (err) { showToast("Gagal menghapus", "error"); }
-            };
-
-            const juAddLine = () => setJuFormLines(prev => [...prev, { keterangan:'', debit:'', kredit:'' }]);
-            const juRemoveLine = (i) => setJuFormLines(prev => prev.filter((_, idx) => idx !== i));
-            const juUpdateLine = (i, field, val) => setJuFormLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
-
-            if (loading || juLoading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
-
-            const isIn = activeSubTab === 'penerimaan';
-            const isJu = activeSubTab === 'jurnal_umum';
-
-            const fJurnal = (n) => n ? formatRupiah(n) : '';
-            const fTglJurnal = (dateStr) => {
-                if (!dateStr) return '';
-                return dateStr.split('-')[2];
-            };
-
-            return (
-                <div className="max-w-5xl mx-auto space-y-4 pb-28">
-                    {/* Header */}
-                    <div>
-                        <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Icon name="scale-balanced" className="text-emerald-600" /> Keuangan
-                        </h1>
-                        <p className="text-[10px] text-slate-500 font-bold">Semua Toko — Data Gabungan</p>
-                    </div>
-
-                    {/* Summary Card */}
-                    <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-4 text-white shadow-lg shadow-green-200">
-                            <p className="text-green-100 text-[10px] font-bold uppercase mb-1">Penerimaan</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.inTotal)}</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-2xl p-4 text-white shadow-lg shadow-red-200">
-                            <p className="text-red-100 text-[10px] font-bold uppercase mb-1">Pengeluaran</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.outTotal)}</p>
-                        </div>
-                        <div className={`bg-gradient-to-br ${stats.net >= 0 ? 'from-sky-500 to-blue-600 shadow-blue-200' : 'from-orange-500 to-amber-600 shadow-orange-200'} rounded-2xl p-4 text-white shadow-lg`}>
-                            <p className="text-sky-100 text-[10px] font-bold uppercase mb-1">Selisih</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.net)}</p>
-                        </div>
-                    </div>
-
-                    {/* Sub-tab Switch */}
-                    <div className="flex bg-white p-1.5 rounded-xl shadow-sm border border-slate-100">
-                        <button onClick={() => setActiveSubTab('penerimaan')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'penerimaan' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="circle-arrow-down" /> Penerimaan Kas
-                        </button>
-                        <button onClick={() => setActiveSubTab('pengeluaran')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="circle-arrow-up" /> Pengeluaran Kas
-                        </button>
-                        <button onClick={() => setActiveSubTab('jurnal_umum')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'jurnal_umum' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="book-open" /> Jurnal Umum
-                        </button>
-                    </div>
-
-                    {/* Filter Bulan */}
-                    <div className="flex items-center gap-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Periode:</label>
-                        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
-                            className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400" />
-                    </div>
-
-                    {/* ===== PENERIMAAN KAS - JURNAL TABLE ===== */}
-                    {isIn && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-emerald-100 font-bold text-xs mt-0.5">Jurnal Penerimaan Kas</p>
-                                <p className="text-emerald-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-700 font-black" colSpan={2}>Debit</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={3}>Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
-                                        </tr>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Kas</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Pot. Penj.</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Piutang</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Penjualan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Serba-Serbi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredAsc.length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 7 : 8} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada penerimaan kas
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {filteredAsc.map((entry, idx) => (
-                                            <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.kas != null ? entry.kas : entry.amount)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.potonganPenjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.piutang)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.penjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.serbiSerbi)}</td>
-                                                {!readOnly && (
-                                                    <td className="border border-slate-200 px-1 py-1 text-center">
-                                                        <div className="flex flex-col gap-0.5 items-center">
-                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                        </div>
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {filteredAsc.length > 0 && (
-                                        <tfoot>
-                                            <tr className="bg-gradient-to-r from-emerald-50 to-green-50">
-                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{formatRupiah(jurnalTotals.kas)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{jurnalTotals.potongan ? formatRupiah(jurnalTotals.potongan) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.piutang ? formatRupiah(jurnalTotals.piutang) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotals.penjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.serbi ? formatRupiah(jurnalTotals.serbi) : '-'}</td>
-                                                {!readOnly && <td className="border border-slate-200"></td>}
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={openAdd} className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Penerimaan Kas
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== PENGELUARAN KAS - JURNAL TABLE ===== */}
-                    {!isIn && !isJu && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-red-100 font-bold text-xs mt-0.5">Jurnal Pengeluaran Kas</p>
-                                <p className="text-red-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Ref.</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-700 font-black" colSpan={3}>Debet</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={2}>Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
-                                        </tr>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Utang</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Pembelian</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Akun Lain</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Kas</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Pot. Pemb.</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredOutAsc.length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 8 : 9} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada pengeluaran kas
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {filteredOutAsc.map((entry, idx) => (
-                                            <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-center text-slate-500">{entry.ref || '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.utang)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.pembelian)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.akunLainnya)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.kasOut != null ? entry.kasOut : entry.amount)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.potonganPembelian)}</td>
-                                                {!readOnly && (
-                                                    <td className="border border-slate-200 px-1 py-1 text-center">
-                                                        <div className="flex flex-col gap-0.5 items-center">
-                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                        </div>
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {filteredOutAsc.length > 0 && (
-                                        <tfoot>
-                                            <tr className="bg-gradient-to-r from-red-50 to-rose-50">
-                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.utang ? formatRupiah(jurnalTotalsOut.utang) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.pembelian)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.akunLainnya ? formatRupiah(jurnalTotalsOut.akunLainnya) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.kas)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotalsOut.potonganPembelian ? formatRupiah(jurnalTotalsOut.potonganPembelian) : '-'}</td>
-                                                {!readOnly && <td className="border border-slate-200"></td>}
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={openAdd} className="w-full py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Pengeluaran Kas
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== JURNAL UMUM ===== */}
-                    {isJu && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-violet-100 font-bold text-xs mt-0.5">Jurnal Umum</p>
-                                <p className="text-violet-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[500px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold">Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-left text-slate-600 font-bold">Keterangan / Akun</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-violet-700 font-black">Debit</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black">Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold">•</th>}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {juEntries.filter(e => e.date && e.date.startsWith(filterMonth)).length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 4 : 5} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada jurnal umum
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {juEntries.filter(e => e.date && e.date.startsWith(filterMonth)).map((entry) => (
-                                            entry.lines && entry.lines.map((line, li) => (
-                                                <tr key={`${entry.id}-${li}`} className="hover:bg-violet-50/30 transition-colors">
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">{li === 0 ? fTglJurnal(entry.date) : ''}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-slate-700">{line.keterangan}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-violet-700 whitespace-nowrap">{fJurnal(line.debit)}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(line.kredit)}</td>
-                                                    {!readOnly && (
-                                                        <td className="border border-slate-200 px-1 py-1 text-center" rowSpan={li === 0 ? entry.lines.length : undefined} style={{display: li === 0 ? '' : 'none'}}>
-                                                            <div className="flex flex-col gap-0.5 items-center">
-                                                                <button onClick={() => juOpenEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                                <button onClick={() => juHandleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                            </div>
-                                                        </td>
-                                                    )}
-                                                </tr>
-                                            ))
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={juOpenAdd} className="w-full py-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Jurnal Umum
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== MODAL JURNAL UMUM ===== */}
-                    {showJuModal && (() => {
-                        const juLiveTotalDebit  = juFormLines.reduce((a, l) => a + safeNumber(l.debit), 0);
-                        const juLiveTotalKredit = juFormLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
-                        const juBalanced = juLiveTotalDebit === juLiveTotalKredit && juLiveTotalDebit > 0;
-                        return (
-                            <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
-                                <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                                    <div className="p-5 flex-shrink-0 bg-gradient-to-r from-violet-600 to-purple-600">
-                                        <h3 className="font-bold text-white text-base flex items-center gap-2">
-                                            <Icon name="book-open" />
-                                            {juEditingId ? 'Edit' : 'Tambah'} Jurnal Umum
-                                        </h3>
-                                        <p className="text-violet-200 text-[10px] mt-1 font-medium">Debit harus sama dengan Kredit</p>
-                                    </div>
-                                    <div className="p-4 space-y-3 overflow-y-auto flex-1">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal Transaksi</label>
-                                            <input type="date" value={juFormDate} onChange={e => setJuFormDate(e.target.value)}
-                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-violet-400" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex items-center gap-2">
-                                                <div className="h-px flex-1 bg-violet-100"></div>
-                                                <span className="text-[10px] font-black text-violet-600 uppercase">Baris Jurnal</span>
-                                                <div className="h-px flex-1 bg-violet-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-[1fr_90px_90px_24px] gap-1 text-[9px] font-black text-slate-400 uppercase px-1">
-                                                <span>Keterangan / Akun</span>
-                                                <span className="text-center text-violet-600">Debit</span>
-                                                <span className="text-center text-sky-600">Kredit</span>
-                                                <span></span>
-                                            </div>
-                                            {juFormLines.map((line, i) => (
-                                                <div key={i} className="grid grid-cols-[1fr_90px_90px_24px] gap-1 items-center">
-                                                    <input type="text" placeholder={i === 0 ? "Mis: Kas..." : "Mis: Modal..."} value={line.keterangan} onChange={e => juUpdateLine(i, 'keterangan', e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:border-violet-400 w-full" />
-                                                    <input type="number" placeholder="0" value={line.debit} onChange={e => juUpdateLine(i, 'debit', e.target.value)} className="p-2 bg-violet-50 border border-violet-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-violet-500 w-full" />
-                                                    <input type="number" placeholder="0" value={line.kredit} onChange={e => juUpdateLine(i, 'kredit', e.target.value)} className="p-2 bg-sky-50 border border-sky-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-sky-500 w-full" />
-                                                    <button onClick={() => juRemoveLine(i)} disabled={juFormLines.length <= 2} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-400 disabled:opacity-20 transition-colors text-xs"><Icon name="xmark" /></button>
-                                                </div>
-                                            ))}
-                                            <button onClick={juAddLine} className="w-full py-2 border-2 border-dashed border-violet-200 text-violet-400 hover:border-violet-400 hover:text-violet-600 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1">
-                                                <Icon name="plus" /> Tambah Baris
-                                            </button>
-                                        </div>
-                                        {(juLiveTotalDebit > 0 || juLiveTotalKredit > 0) && (
-                                            <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${juBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                <span><Icon name={juBalanced ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(juLiveTotalDebit)}</span>
-                                                <span>Kredit: {formatRupiah(juLiveTotalKredit)}</span>
-                                                {!juBalanced && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(juLiveTotalDebit - juLiveTotalKredit))}</span>}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="p-4 flex gap-2 flex-shrink-0 border-t border-slate-100">
-                                        <button onClick={() => setShowJuModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Batal</button>
-                                        <button onClick={juHandleSubmit} disabled={juSubmitting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors">
-                                            {juSubmitting ? 'Menyimpan...' : (juEditingId ? 'Perbarui' : 'Simpan')}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })()}
-
-                    {/* ===== MODAL ADD/EDIT ===== */}
-                    {showModal && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
-                            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                                <div className={`p-5 flex-shrink-0 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
-                                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                                        <Icon name={isIn ? "circle-arrow-down" : "circle-arrow-up"} />
-                                        {editingId ? 'Edit' : 'Tambah'} {isIn ? 'Penerimaan Kas' : 'Pengeluaran Kas'}
-                                    </h3>
-                                    {isIn && <p className="text-emerald-100 text-[10px] mt-1 font-medium">Isi kolom jurnal sesuai transaksi</p>}
-                                </div>
-                                <div className="p-5 space-y-3 overflow-y-auto flex-1">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
-                                            <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
-                                            <input type="text" placeholder="Mis: Penjualan tunai..." value={formDesc} onChange={e => setFormDesc(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
-                                        </div>
-                                    </div>
-                                    {isIn && (
-                                        <>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-emerald-100"></div>
-                                                <span className="text-[10px] font-black text-emerald-600 uppercase">Debit</span>
-                                                <div className="h-px flex-1 bg-emerald-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Kas</label>
-                                                    <input type="number" placeholder="0" value={formKas} onChange={e => setFormKas(e.target.value)} className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Potongan Penjualan</label>
-                                                    <input type="number" placeholder="0" value={formPotongan} onChange={e => setFormPotongan(e.target.value)} className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Piutang</label>
-                                                    <input type="number" placeholder="0" value={formPiutang} onChange={e => setFormPiutang(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Penjualan</label>
-                                                    <input type="number" placeholder="0" value={formPenjualan} onChange={e => setFormPenjualan(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Serba-Serbi</label>
-                                                <input type="number" placeholder="0" value={formSerbi} onChange={e => setFormSerbi(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                            </div>
-                                            {(formKas || formPotongan || formPiutang || formPenjualan || formSerbi) && (() => {
-                                                const d = safeNumber(formKas) + safeNumber(formPotongan);
-                                                const k = safeNumber(formPiutang) + safeNumber(formPenjualan) + safeNumber(formSerbi);
-                                                const ok = d === k && d > 0;
-                                                return (
-                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(d)}</span>
-                                                        <span>Kredit: {formatRupiah(k)}</span>
-                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </>
-                                    )}
-                                    {!isIn && (
-                                        <>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Ref. (opsional)</label>
-                                                <input type="text" placeholder="No. referensi..." value={formRef} onChange={e => setFormRef(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400" />
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-red-100"></div>
-                                                <span className="text-[10px] font-black text-red-600 uppercase">Debet</span>
-                                                <div className="h-px flex-1 bg-red-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Utang</label>
-                                                    <input type="number" placeholder="0" value={formUtang} onChange={e => setFormUtang(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Pembelian</label>
-                                                    <input type="number" placeholder="0" value={formPembelian} onChange={e => setFormPembelian(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Akun Lainnya</label>
-                                                <input type="number" placeholder="0" value={formAkunLainnya} onChange={e => setFormAkunLainnya(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Kas</label>
-                                                    <input type="number" placeholder="0" value={formKasOut} onChange={e => setFormKasOut(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Pot. Pembelian</label>
-                                                    <input type="number" placeholder="0" value={formPotonganPembelian} onChange={e => setFormPotonganPembelian(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                            </div>
-                                            {(formUtang || formPembelian || formAkunLainnya || formKasOut || formPotonganPembelian) && (() => {
-                                                const d = safeNumber(formUtang) + safeNumber(formPembelian) + safeNumber(formAkunLainnya);
-                                                const k = safeNumber(formKasOut) + safeNumber(formPotonganPembelian);
-                                                const ok = d === k && d > 0;
-                                                return (
-                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debet: {formatRupiah(d)}</span>
-                                                        <span>Kredit: {formatRupiah(k)}</span>
-                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </>
-                                    )}
-                                    <div className="flex gap-2 pt-2">
-                                        <button onClick={() => setShowModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Batal</button>
-                                        <button onClick={handleSubmit} disabled={submitting} className={`flex-1 py-3 ${isIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'} text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors`}>
-                                            {submitting ? 'Menyimpan...' : (editingId ? 'Perbarui' : 'Simpan')}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
-
         // --- CASHIER COMPONENT ---
         // =============================================
         // ITEM NOTE MODAL - Kartu Catatan Barang
@@ -6750,6 +6009,112 @@
             const [paymentSuccess, setPaymentSuccess] = useState(false);
             const [receiptData, setReceiptData] = useState(null);
             const [cancelModal, setCancelModal] = useState(false);
+
+            // ── OFFLINE MODE ─────────────────────────────────────────────────────────────
+            const [isOfflineMode, setIsOfflineMode] = useState(false);
+            const [isOnline, setIsOnline] = useState(navigator.onLine);
+            const [offlineQueue, setOfflineQueue] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('rafa_offline_queue') || '[]'); } catch { return []; }
+            });
+            const [isSyncing, setIsSyncing] = useState(false);
+
+            // Listener online/offline
+            useEffect(() => {
+                const goOnline  = () => setIsOnline(true);
+                const goOffline = () => setIsOnline(false);
+                window.addEventListener('online',  goOnline);
+                window.addEventListener('offline', goOffline);
+                return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+            }, []);
+
+            // Simpan offlineQueue ke localStorage setiap berubah
+            useEffect(() => {
+                localStorage.setItem('rafa_offline_queue', JSON.stringify(offlineQueue));
+            }, [offlineQueue]);
+
+            // Auto-sync saat kembali online
+            useEffect(() => {
+                if (!isOnline || offlineQueue.length === 0 || isSyncing || !user) return;
+                const syncAll = async () => {
+                    setIsSyncing(true);
+                    try {
+                        for (const tx of offlineQueue) {
+                            const batch = window.writeBatch(window.db);
+                            // Update stok
+                            (tx.items || []).forEach(item => {
+                                const stockField = `stocks.${tx.storeId}`;
+                                if (item.isRacikanGroup) {
+                                    (item.racikanItems || []).forEach(ri => {
+                                        const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', ri.id);
+                                        batch.update(docRef, { [stockField]: window.increment(-ri.qty), updatedAt: window.serverTimestamp() });
+                                    });
+                                } else {
+                                    const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
+                                    batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() });
+                                }
+                            });
+                            // Simpan transaksi dengan coTime (waktu checkout saat offline)
+                            const txRef = window.doc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'transactions'));
+                            batch.set(txRef, {
+                                ...tx,
+                                date: tx.coTime ? new Date(tx.coTime) : window.serverTimestamp(),
+                                syncedAt: window.serverTimestamp(),
+                                offlineSync: true,
+                            });
+                            await batch.commit();
+                        }
+                        setOfflineQueue([]);
+                        showToast(`✅ ${offlineQueue.length} transaksi offline berhasil disinkronkan!`);
+                    } catch (e) {
+                        console.error('Sync error:', e);
+                        showToast('Gagal sinkronisasi, coba lagi nanti', 'error');
+                    } finally { setIsSyncing(false); }
+                };
+                syncAll();
+            }, [isOnline, user]);
+
+            const startOfflineMode = () => {
+                setIsOfflineMode(true);
+                setIsSessionActive(true);
+                setActiveCartId(null);
+                showToast('🔌 Mode Offline aktif — transaksi disimpan lokal', 'info');
+            };
+
+            const handleOfflineCheckout = () => {
+                if (cart.length === 0) return;
+                const isNonCash = paymentMethod === 'qris' || paymentMethod === 'transfer';
+                if (!isNonCash && safeNumber(paymentAmount) < effectiveTotal) { showToast('Uang kurang!', 'error'); return; }
+                const finalPay = isNonCash ? effectiveTotal : safeNumber(paymentAmount);
+                const finalChange = isNonCash ? 0 : (safeNumber(paymentAmount) - effectiveTotal);
+                const coTime = new Date().toISOString(); // waktu CO aktual
+                const tx = {
+                    coTime,
+                    items: cart,
+                    subtotal: cartSubtotal,
+                    diskon: cartDiskonNominal,
+                    diskonType: cartDiskonType,
+                    biayaPengiriman: cartPengirimanNum,
+                    pembulatan: pembulatanDiff,
+                    total: effectiveTotal,
+                    pay: finalPay,
+                    change: finalChange,
+                    paymentMethod: paymentMethod || 'tunai',
+                    status: 'success',
+                    cashierName: cashierName || 'Kasir',
+                    salesName: selectedSales || cashierName || 'Kasir',
+                    tipeTransaksi: tipeTransaksi || 'Harga normal',
+                    pembeli: selectedPembeli || '',
+                    storeId: currentProfile.id || 'default',
+                    storeName: currentProfile.name,
+                    offlineMode: true,
+                };
+                setOfflineQueue(prev => [...prev, tx]);
+                setReceiptData({ ...tx, id: 'offline-' + Date.now(), date: new Date(coTime) });
+                setPaymentSuccess(true);
+                try { const s = document.getElementById('chaching-sound'); if(s){ s.currentTime=0; s.play(); } } catch(e) {}
+                showToast('💾 Transaksi disimpan offline!');
+            };
+            // ─────────────────────────────────────────────────────────────────────────────
             const [btDevice, setBtDevice] = useState(null);
             const [pendingCarts, setPendingCarts] = useState([]);
             const [activeCarts, setActiveCarts] = useState([]); // Keranjang aktif kasir lain
@@ -7086,7 +6451,7 @@
 
             // Sync cart ke Firestore setiap kali cart berubah (outgoing)
             useEffect(() => {
-                if (!isSessionActive || !activeCartId || !cashierName) return;
+                if (!isSessionActive || !activeCartId || !cashierName || isOfflineMode) return;
                 
                 const syncCart = async () => {
                     // Skip jika cart baru saja diupdate dari luar (oleh kasir lain)
@@ -7114,7 +6479,7 @@
 
             // Listener incoming: ketika item di keranjang kita diubah dari HP lain
             useEffect(() => {
-                if (!isSessionActive || !activeCartId) return;
+                if (!isSessionActive || !activeCartId || isOfflineMode) return;
                 const cartRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'active_carts', activeCartId);
                 const unsub = window.onSnapshot(cartRef, (snap) => {
                     if (!snap.exists()) return;
@@ -7643,7 +7008,20 @@
                     return c;
                 }));
             };
-            const handleBack = async () => { 
+            const handleBack = async () => {
+                if (isOfflineMode) {
+                    // Mode offline: simpan cart ke localStorage sebagai draft offline
+                    if (cart.length > 0) {
+                        const draft = { isDraft: true, items: cart, total: grandTotal, cashierName: cashierName, storeId: currentProfile.id, storeName: currentProfile.name, savedAt: new Date().toISOString() };
+                        localStorage.setItem('rafa_offline_draft', JSON.stringify(draft));
+                        showToast('Keranjang disimpan (offline draft)', 'info');
+                    }
+                    setIsOfflineMode(false);
+                    setIsSessionActive(false);
+                    setSearch('');
+                    setCart([]);
+                    return;
+                }
                 if (cart.length > 0) { 
                     try {
                         await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'pending_carts'), {
@@ -7683,7 +7061,7 @@
             
             const confirmCancel = async () => { 
                 // NEW: Hapus active cart dari Firestore
-                if (activeCartId) {
+                if (activeCartId && !isOfflineMode) {
                     try {
                         await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'active_carts', activeCartId));
                     } catch (error) {
@@ -7702,6 +7080,7 @@
                 localStorage.removeItem('activeCartId');
                 showToast("Transaksi dibatalkan & keranjang dikosongkan", "info");
                 setIsSessionActive(false);
+                setIsOfflineMode(false);
             };
             
             const resumeTransaction = async (pendingItem) => { 
@@ -7736,6 +7115,8 @@
             };
 
             const handleCheckout = async () => {
+                // Jika mode offline, gunakan handleOfflineCheckout
+                if (isOfflineMode) { handleOfflineCheckout(); return; }
                 if (!user) return;
                 if (cart.length === 0) return;
                 const isNonCash = paymentMethod === 'qris' || paymentMethod === 'transfer';
@@ -7813,9 +7194,11 @@
                 setCartDiskon('0');
                 setCartDiskonType('%');
                 setCartBiayaPengiriman('0');
-                setIsSessionActive(false); 
+                setIsSessionActive(false);
+                setIsOfflineMode(false);
                 setActiveCartId(null);
                 localStorage.removeItem('activeCartId');
+                localStorage.removeItem('rafa_offline_draft');
                 // cashierName TETAP disimpan untuk sesi berikutnya
             };
             
@@ -7841,16 +7224,53 @@
                 return (
                     <div className="fade-in h-full overflow-y-auto pb-20 md:pb-0 flex flex-col items-center md:justify-start md:pt-8 justify-center relative z-10">
                         <div className="w-full max-w-sm px-4 flex flex-col items-center">
+
+                             {/* BANNER STATUS ONLINE/OFFLINE */}
+                             {!isOnline && (
+                                 <div className="w-full mb-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2.5 flex items-center gap-2.5 fade-in">
+                                     <div className="w-6 h-6 bg-amber-400 rounded-full flex items-center justify-center flex-shrink-0">
+                                         <Icon name="wifi" className="text-white text-[10px]" />
+                                     </div>
+                                     <div className="flex-1 min-w-0">
+                                         <p className="text-xs font-black text-amber-700">Tidak ada koneksi internet</p>
+                                         <p className="text-[10px] text-amber-600">Gunakan Mode Offline untuk tetap berjualan</p>
+                                     </div>
+                                 </div>
+                             )}
+
+                             {/* BANNER SINKRONISASI */}
+                             {isSyncing && (
+                                 <div className="w-full mb-3 bg-sky-50 border border-sky-200 rounded-2xl px-4 py-2.5 flex items-center gap-2.5 fade-in">
+                                     <Icon name="spinner" className="text-sky-500 animate-spin text-sm flex-shrink-0" />
+                                     <p className="text-xs font-bold text-sky-700">Menyinkronkan transaksi offline...</p>
+                                 </div>
+                             )}
+                             {isOnline && offlineQueue.length > 0 && !isSyncing && (
+                                 <div className="w-full mb-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-2.5 flex items-center gap-2.5 fade-in">
+                                     <Icon name="check-circle" className="text-green-500 text-sm flex-shrink-0" />
+                                     <div className="flex-1">
+                                         <p className="text-xs font-black text-green-700">{offlineQueue.length} transaksi menunggu sinkronisasi</p>
+                                         <p className="text-[10px] text-green-600">Akan otomatis tersinkron saat online</p>
+                                     </div>
+                                 </div>
+                             )}
+
                              {/* BANNER TOKO AKTIF */}
-                             <div className="mb-6 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-white shadow-sm w-full text-center">
+                             <div className="mb-4 bg-white/60 backdrop-blur-md p-4 rounded-2xl border border-white shadow-sm w-full text-center">
                                 <p className="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">POS Kasir Aktif</p>
                                 <h2 className="text-xl font-black text-slate-800 flex items-center justify-center gap-2">
                                     <Icon name="store" className="text-sky-600" /> {currentProfile.name}
                                 </h2>
+                                {/* Indikator status koneksi di dalam banner */}
+                                <div className={`mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${isOnline ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500' : 'bg-amber-500'}`}></span>
+                                    {isOnline ? 'Online' : 'Offline'}
+                                    {offlineQueue.length > 0 && isOnline && <span className="ml-1 bg-orange-400 text-white rounded-full px-1.5 text-[9px]">{offlineQueue.length} pending</span>}
+                                </div>
                              </div>
 
                              {/* Tombol Penjualan Baru - compact, di bawah banner */}
-                             <button onClick={() => handleStartSession(cashierName)} className="w-full mb-4 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-2xl px-4 py-3 flex items-center justify-between shadow-md transition-all group">
+                             <button onClick={() => handleStartSession(cashierName)} className="w-full mb-3 bg-sky-500 hover:bg-sky-600 active:scale-95 text-white rounded-2xl px-4 py-3 flex items-center justify-between shadow-md transition-all group">
                                  <div className="flex items-center gap-3">
                                      <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center text-lg group-hover:scale-110 transition-transform">
                                          <Icon name="cart-plus" />
@@ -7862,6 +7282,36 @@
                                  </div>
                                  <Icon name="chevron-right" className="text-sky-200 text-sm" />
                              </button>
+
+                             {/* ── TOMBOL MODE OFFLINE ────────────────────────────────── */}
+                             <button
+                                 onClick={startOfflineMode}
+                                 className={`w-full mb-4 rounded-2xl px-4 py-3 flex items-center justify-between shadow-sm transition-all group active:scale-95 border-2 ${
+                                     !isOnline
+                                         ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-400'
+                                         : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200 hover:border-amber-300'
+                                 }`}
+                                 title="Mode tanpa internet — transaksi disimpan lokal & otomatis tersinkron saat online"
+                             >
+                                 <div className="flex items-center gap-3">
+                                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg group-hover:scale-110 transition-transform ${!isOnline ? 'bg-white/20' : 'bg-amber-100'}`}>
+                                         <Icon name="plug" className={!isOnline ? 'text-white' : 'text-amber-500'} />
+                                     </div>
+                                     <div className="text-left">
+                                         <p className={`font-black text-sm leading-none ${!isOnline ? 'text-white' : 'text-slate-700'}`}>Mode Offline</p>
+                                         <p className={`text-[10px] mt-0.5 ${!isOnline ? 'text-amber-100' : 'text-slate-400'}`}>
+                                             {offlineQueue.length > 0 ? `${offlineQueue.length} transaksi belum tersinkron` : 'Transaksi disimpan lokal, sync otomatis'}
+                                         </p>
+                                     </div>
+                                 </div>
+                                 <div className="flex items-center gap-1.5">
+                                     {offlineQueue.length > 0 && (
+                                         <span className="w-5 h-5 bg-orange-400 text-white rounded-full text-[10px] font-black flex items-center justify-center">{offlineQueue.length}</span>
+                                     )}
+                                     <Icon name="chevron-right" className={`text-sm ${!isOnline ? 'text-amber-200' : 'text-slate-300'}`} />
+                                 </div>
+                             </button>
+                             {/* ───────────────────────────────────────────────────────── */}
 
                              {(activeCarts.length > 0 || pendingCarts.length > 0) && (
                                 <div className="w-full mb-4 fade-in">
@@ -7958,11 +7408,26 @@
                         {/* Tombol Kembali - paling atas */}
                         <button onClick={handleBack} className="w-10 h-10 rounded-xl bg-white text-slate-400 hover:text-sky-600 hover:border-sky-300 border border-slate-200 flex items-center justify-center shadow-sm transition-colors mb-3" title="Kembali & Simpan Sementara"><Icon name="arrow-left" /></button>
 
+                        {/* OFFLINE MODE BANNER */}
+                        {isOfflineMode && (
+                            <div className="mb-3 bg-amber-50 border-2 border-amber-300 rounded-2xl px-3 py-2 flex items-center gap-2 fade-in">
+                                <div className="w-7 h-7 bg-amber-400 rounded-xl flex items-center justify-center flex-shrink-0">
+                                    <Icon name="plug" className="text-white text-xs" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-black text-amber-800 leading-none">Mode Offline Aktif</p>
+                                    <p className="text-[10px] text-amber-600 mt-0.5">Transaksi disimpan lokal — tersinkron otomatis saat online</p>
+                                </div>
+                                <span className="text-[10px] bg-amber-200 text-amber-700 rounded-full px-2 py-0.5 font-bold flex-shrink-0">{offlineQueue.length} pending</span>
+                            </div>
+                        )}
+
                         {/* Slim kasir indicator */}
                         <div className="flex items-center gap-2 mb-3 px-1">
                             <div className="w-6 h-6 bg-sky-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-sm">{cashierName.charAt(0).toUpperCase()}</div>
                             <span className="text-xs font-bold text-sky-700">{cashierName}</span>
                             <span className="text-[10px] text-slate-400">• {currentProfile.name}</span>
+                            {isOfflineMode && <span className="text-[10px] bg-amber-100 text-amber-600 font-bold px-1.5 py-0.5 rounded-full">🔌 Offline</span>}
                         </div>
                         
                         {/* Info Transaksi */}
@@ -12636,7 +12101,7 @@
                                     <Icon name="shop" className="text-white text-2xl" />
                                 </div>
                             </div>
-                            <h1 className="font-black text-2xl text-slate-800 tracking-tight">Apotek Rafa Medica</h1>
+                            <h1 className="font-black text-2xl text-slate-800 tracking-tight">Rafa Medica</h1>
                             <p className="text-slate-500 text-sm font-medium mt-1">Sistem Kasir & Manajemen Stok</p>
                         </div>
 
@@ -15359,7 +14824,6 @@
                 { id: 'list',        label: 'Stok Barang',       icon: 'boxes-stacked',       enabled: isOwner || showMenu('showMenuStock', settingsData.showMenuStock),        readOnly: !isOwner && !menuOn('enableStock', settingsData.enableStock) }, 
                 { id: 'stock_opname',label: 'Stock Opname',      icon: 'clipboard-check',     enabled: isOwner || showMenu('showMenuStockOpname', settingsData.showMenuStockOpname), readOnly: !isOwner && !menuOn('enableStockOpname', settingsData.enableStockOpname) },
                 { id: 'cashbook',    label: 'Buku Kas',          icon: 'book',                enabled: isOwner || showMenu('showMenuCashbook', settingsData.showMenuCashbook),  readOnly: !isOwner && !menuOn('enableCashbook', settingsData.enableCashbook) },
-                { id: 'keuangan',    label: 'Keuangan',          icon: 'scale-balanced',      enabled: isOwner || showMenu('showMenuKeuangan', settingsData.showMenuKeuangan),  readOnly: !isOwner && !menuOn('enableKeuangan', settingsData.enableKeuangan) },
                 { id: 'catatan',     label: 'Catatan',           icon: 'thumbtack',           enabled: isOwner || showMenu('showMenuCatatan', settingsData.showMenuCatatan),    readOnly: !isOwner && !menuOn('enableCatatan', settingsData.enableCatatan) },
                 { id: 'add',         label: 'Input Manual',      icon: 'pen-to-square',       enabled: isOwner || showMenu('showMenuAdd', settingsData.showMenuAdd),            readOnly: !isOwner && !menuOn('enableInputManual', settingsData.enableInputManual) }, 
                 { id: 'import',      label: 'Import Masal',      icon: 'file-import',         enabled: isOwner || showMenu('showMenuImport', settingsData.showMenuImport),      readOnly: !isOwner && !menuOn('enableImport', settingsData.enableImport) }, 
@@ -15678,7 +15142,6 @@
                         {activeTab === 'history' && (<HistoryView user={user} showToast={showToast} settings={settingsData} onGenerateImage={handleGenerateImage} currentProfile={currentProfile} items={inventoryData} readOnly={menuItems.find(m=>m.id==='history')?.readOnly} isOwner={isOwner} authSession={authSession} />)}
                         {activeTab === 'purchases' && (<PurchaseView user={user} showToast={showToast} items={inventoryData} currentProfile={currentProfile} settings={settingsData} readOnly={menuItems.find(m=>m.id==='purchases')?.readOnly} />)}
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='cashbook')?.readOnly} />)}
-                        {activeTab === 'keuangan' && (<KeuanganView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='keuangan')?.readOnly} />)}
                         {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='list')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', costPrice:'', minStock: '', defaultDiscount: '', defaultDiscountType: '%'}); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='add')?.readOnly} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='import')?.readOnly} />)}
@@ -15699,45 +15162,5 @@
         root.render(<App />);
     </script>
 <audio id="chaching-sound" src="cha-ching.mp3" preload="auto"></audio>
-
-<!-- OFFLINE BANNER -->
-<div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;background:#dc2626;color:white;text-align:center;padding:10px 16px;z-index:99999;font-size:13px;font-weight:600;letter-spacing:0.3px;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-  📵 MODE OFFLINE — Semua fitur tetap berjalan. Data akan sync otomatis saat internet kembali.
-</div>
-
-<script>
-function updateOnlineStatus() {
-    const banner = document.getElementById('offline-banner');
-    if (!navigator.onLine) {
-        banner.style.display = 'block';
-        document.body.style.paddingTop = '42px';
-    } else {
-        banner.style.display = 'none';
-        document.body.style.paddingTop = '';
-        if (window._wasOffline) {
-            const toast = document.createElement('div');
-            toast.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#16a34a;color:white;padding:10px 20px;border-radius:8px;z-index:99999;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
-            toast.innerHTML = '✅ Kembali Online — Data offline sedang disinkronisasi...';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 4000);
-        }
-        window._wasOffline = false;
-    }
-    if (!navigator.onLine) window._wasOffline = true;
-}
-window.addEventListener('online', updateOnlineStatus);
-window.addEventListener('offline', updateOnlineStatus);
-updateOnlineStatus();
-
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-            console.log('Service Worker aktif');
-        }).catch(err => {
-            console.warn('SW tidak terdaftar:', err.message);
-        });
-    });
-}
-</script>
 </body>
 </html>
