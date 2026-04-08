@@ -120,26 +120,9 @@
         window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
     </script>
 
-    <!-- Blokir Pull-to-Refresh -->
-    <script>
-        (function() {
-            let startY = 0;
-            document.addEventListener('touchstart', function(e) {
-                startY = e.touches[0].clientY;
-            }, { passive: true });
-
-            document.addEventListener('touchmove', function(e) {
-                const deltaY = e.touches[0].clientY - startY;
-                // Hanya blokir jika: halaman di posisi paling atas DAN jari geser ke bawah (pull)
-                if (deltaY > 0 && (window.scrollY === 0 && document.documentElement.scrollTop === 0)) {
-                    e.preventDefault();
-                }
-            }, { passive: false });
-        })();
-    </script>
-
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f0f9ff; -webkit-tap-highlight-color: transparent; overflow-x: hidden; overscroll-behavior-y: none; }
+        html { overscroll-behavior-y: none; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         ::-webkit-scrollbar-track { background: transparent; }
