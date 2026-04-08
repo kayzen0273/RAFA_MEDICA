@@ -123,35 +123,16 @@
     <!-- Blokir Pull-to-Refresh -->
     <script>
         (function() {
-            let lastTouchY = 0;
+            let startY = 0;
             document.addEventListener('touchstart', function(e) {
-                lastTouchY = e.touches[0].clientY;
-            }, { passive: false });
+                startY = e.touches[0].clientY;
+            }, { passive: true });
 
             document.addEventListener('touchmove', function(e) {
-                const touchY = e.touches[0].clientY;
-                const touchYDelta = touchY - lastTouchY;
-                const el = e.target;
-
-                // Cari elemen scroll terdekat
-                let scrollable = el;
-                while (scrollable !== document.body && scrollable !== null) {
-                    const style = window.getComputedStyle(scrollable);
-                    const overflowY = style.getPropertyValue('overflow-y');
-                    if (overflowY === 'auto' || overflowY === 'scroll') break;
-                    scrollable = scrollable.parentElement;
-                }
-
-                // Jika di atas halaman dan geser ke bawah (pull-to-refresh), blokir
-                if (scrollable === document.body || scrollable === null) {
-                    if (touchYDelta > 0) {
-                        e.preventDefault();
-                    }
-                } else {
-                    // Blokir jika sudah di ujung atas elemen scroll
-                    if (scrollable.scrollTop === 0 && touchYDelta > 0) {
-                        e.preventDefault();
-                    }
+                const deltaY = e.touches[0].clientY - startY;
+                // Hanya blokir jika: halaman di posisi paling atas DAN jari geser ke bawah (pull)
+                if (deltaY > 0 && (window.scrollY === 0 && document.documentElement.scrollTop === 0)) {
+                    e.preventDefault();
                 }
             }, { passive: false });
         })();
