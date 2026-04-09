@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Sistem Kasir Apotek Rafa Medica (V71 - Mode Offline dengan Sinkronisasi Otomatis)</title>
+    <title>Sistem Kasir Apotek Rafa Medica</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -14,7 +14,7 @@
                     colors: {
                         brand: { 50: '#f0fdf4', 100: '#dcfce7', 500: '#22c55e', 600: '#16a34a', 700: '#15803d', 900: '#14532d' },
                         gold: { 100: '#fef9c3', 200: '#fef08a', 300: '#fde047', 400: '#facc15', 500: '#eab308', 600: '#ca8a04', 700: '#a16207' },
-                        rafa: { light: '#0ea5e9', dark: '#0284c7', bg: '#f0f9ff' },
+                        husna: { light: '#0ea5e9', dark: '#0284c7', bg: '#f0f9ff' },
                         night: { 800: '#1e293b', 900: '#0f172a' },
                         ketupat: { light: '#86efac', dark: '#15803d' }
                     },
@@ -121,8 +121,8 @@
     </script>
 
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f0f9ff; -webkit-tap-highlight-color: transparent; overflow-x: hidden; overscroll-behavior-y: none; }
-        html { overscroll-behavior-y: none; }
+        html, body { overscroll-behavior-y: none; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f9ff; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -557,7 +557,6 @@
             enableStock: true,
             enableStockOpname: true,
             enableCashbook: true,
-            enableKeuangan: true,
             enableCatatan: true,
             enableInputManual: true,
             enableImport: true,
@@ -569,7 +568,6 @@
             showMenuStock: true,
             showMenuStockOpname: true,
             showMenuCashbook: true,
-            showMenuKeuangan: true,
             showMenuCatatan: true,
             showMenuAdd: true,
             showMenuImport: true,
@@ -1741,7 +1739,6 @@
                 { key: 'enableStock', label: 'Stok Barang', icon: 'boxes-stacked', desc: 'Manajemen stok' },
                 { key: 'enableStockOpname', label: 'Stock Opname', icon: 'clipboard-check', desc: 'Penghitungan fisik stok' },
                 { key: 'enableCashbook', label: 'Buku Kas', icon: 'book', desc: 'Catatan keuangan' },
-                { key: 'enableKeuangan', label: 'Keuangan', icon: 'scale-balanced', desc: 'Jurnal penerimaan & pengeluaran kas' },
                 { key: 'enableCatatan', label: 'Catatan', icon: 'thumbtack', desc: 'Papan catatan' },
                 { key: 'enableInputManual', label: 'Input Manual', icon: 'pen-to-square', desc: 'Tambah/edit barang' },
                 { key: 'enableImport', label: 'Import Masal', icon: 'file-import', desc: 'Import data Excel' },
@@ -1767,7 +1764,6 @@
                 { key: 'showMenuStock', label: 'Stok Barang', icon: 'boxes-stacked', desc: 'Tampilkan stok barang' },
                 { key: 'showMenuStockOpname', label: 'Stock Opname', icon: 'clipboard-check', desc: 'Tampilkan stock opname' },
                 { key: 'showMenuCashbook', label: 'Buku Kas', icon: 'book', desc: 'Tampilkan buku kas' },
-                { key: 'showMenuKeuangan', label: 'Keuangan', icon: 'scale-balanced', desc: 'Tampilkan menu keuangan (jurnal)' },
                 { key: 'showMenuCatatan', label: 'Catatan', icon: 'thumbtack', desc: 'Tampilkan catatan' },
                 { key: 'showMenuAdd', label: 'Input Manual', icon: 'pen-to-square', desc: 'Tampilkan input manual' },
                 { key: 'showMenuImport', label: 'Import Masal', icon: 'file-import', desc: 'Tampilkan import masal' },
@@ -5809,755 +5805,6 @@
             );
         };
 
-        // --- KEUANGAN COMPONENT ---
-        const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
-            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran' | 'jurnal_umum'
-            const [entries, setEntries] = useState([]);
-            const [loading, setLoading] = useState(true);
-
-            // ===== JURNAL UMUM STATE =====
-            const [juEntries, setJuEntries] = useState([]);
-            const [juLoading, setJuLoading] = useState(true);
-            const [showJuModal, setShowJuModal] = useState(false);
-            const [juSubmitting, setJuSubmitting] = useState(false);
-            const [juEditingId, setJuEditingId] = useState(null);
-            const [juFormDate, setJuFormDate] = useState(new Date().toISOString().slice(0, 10));
-            const [juFormLines, setJuFormLines] = useState([
-                { keterangan: '', debit: '', kredit: '' },
-                { keterangan: '', debit: '', kredit: '' },
-            ]);
-
-            // Form state (shared)
-            const [showModal, setShowModal] = useState(false);
-            const [submitting, setSubmitting] = useState(false);
-            const [formDesc, setFormDesc]     = useState('');
-            const [formDate, setFormDate]     = useState(new Date().toISOString().slice(0, 10));
-            const [formCategory, setFormCategory] = useState('');
-            const [formAmount, setFormAmount] = useState('');
-            const [editingId, setEditingId]   = useState(null);
-
-            // Form state khusus Penerimaan Kas (Jurnal)
-            const [formKas, setFormKas]                 = useState('');
-            const [formPotongan, setFormPotongan]       = useState('');
-            const [formPiutang, setFormPiutang]         = useState('');
-            const [formPenjualan, setFormPenjualan]     = useState('');
-            const [formSerbi, setFormSerbi]             = useState('');
-
-            // Form state khusus Pengeluaran Kas (Jurnal)
-            const [formRef, setFormRef]                         = useState('');
-            const [formUtang, setFormUtang]                     = useState('');
-            const [formPembelian, setFormPembelian]             = useState('');
-            const [formAkunLainnya, setFormAkunLainnya]         = useState('');
-            const [formKasOut, setFormKasOut]                   = useState('');
-            const [formPotonganPembelian, setFormPotonganPembelian] = useState('');
-
-            // Filter bulan
-            const thisMonth = new Date().toISOString().slice(0, 7);
-            const [filterMonth, setFilterMonth] = useState(thisMonth);
-
-            const CATEGORIES_OUT = ['Pembelian Obat', 'Gaji Karyawan', 'Listrik & Air', 'Sewa Tempat', 'ATK & Perlengkapan', 'Biaya Operasional', 'Pengeluaran Lain'];
-
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(300)
-                );
-                const unsub = window.onSnapshot(q, (snapshot) => {
-                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setEntries(all);
-                    setLoading(false);
-                });
-                return () => unsub();
-            }, [user]);
-
-            useEffect(() => {
-                if (!user) return;
-                const q = window.query(
-                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'),
-                    window.orderBy('date', 'desc'),
-                    window.limit(500)
-                );
-                const unsub = window.onSnapshot(q, (snapshot) => {
-                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-                    setJuEntries(all);
-                    setJuLoading(false);
-                });
-                return () => unsub();
-            }, [user]);
-
-            const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
-            const filtered = entries.filter(e => e.type === currentType && e.date && e.date.startsWith(filterMonth));
-            const filteredAsc = activeSubTab === 'penerimaan' ? [...filtered].sort((a, b) => a.date.localeCompare(b.date)) : filtered;
-
-            const stats = React.useMemo(() => {
-                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kas || b.amount), 0);
-                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0);
-                return { inTotal, outTotal, net: inTotal - outTotal };
-            }, [entries, filterMonth]);
-
-            const jurnalTotals = React.useMemo(() => ({
-                kas:      filteredAsc.reduce((a, b) => a + safeNumber(b.kas || b.amount), 0),
-                potongan: filteredAsc.reduce((a, b) => a + safeNumber(b.potonganPenjualan), 0),
-                piutang:  filteredAsc.reduce((a, b) => a + safeNumber(b.piutang), 0),
-                penjualan:filteredAsc.reduce((a, b) => a + safeNumber(b.penjualan), 0),
-                serbi:    filteredAsc.reduce((a, b) => a + safeNumber(b.serbiSerbi), 0),
-            }), [filteredAsc]);
-
-            const filteredOutAsc = [...entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
-
-            const jurnalTotalsOut = React.useMemo(() => ({
-                utang:             filteredOutAsc.reduce((a, b) => a + safeNumber(b.utang), 0),
-                pembelian:         filteredOutAsc.reduce((a, b) => a + safeNumber(b.pembelian), 0),
-                akunLainnya:       filteredOutAsc.reduce((a, b) => a + safeNumber(b.akunLainnya), 0),
-                kas:               filteredOutAsc.reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0),
-                potonganPembelian: filteredOutAsc.reduce((a, b) => a + safeNumber(b.potonganPembelian), 0),
-            }), [filteredOutAsc]);
-
-            const formatBulanIndo = (ym) => {
-                if (!ym) return '';
-                const [y, m] = ym.split('-');
-                const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-                return `${bulan[parseInt(m,10)-1]} ${y}`;
-            };
-
-            const resetInForm = () => { setFormKas(''); setFormPotongan(''); setFormPiutang(''); setFormPenjualan(''); setFormSerbi(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
-            const resetOutForm = () => { setFormRef(''); setFormUtang(''); setFormPembelian(''); setFormAkunLainnya(''); setFormKasOut(''); setFormPotonganPembelian(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
-
-            const openAdd = () => {
-                setEditingId(null);
-                resetInForm();
-                resetOutForm();
-                setFormAmount(''); setFormCategory('');
-                setShowModal(true);
-            };
-
-            const openEdit = (entry) => {
-                setEditingId(entry.id);
-                setFormDate(entry.date);
-                setFormDesc(entry.description);
-                if (entry.type === 'in') {
-                    setFormKas(entry.kas != null ? String(entry.kas) : String(entry.amount || ''));
-                    setFormPotongan(entry.potonganPenjualan ? String(entry.potonganPenjualan) : '');
-                    setFormPiutang(entry.piutang ? String(entry.piutang) : '');
-                    setFormPenjualan(entry.penjualan ? String(entry.penjualan) : '');
-                    setFormSerbi(entry.serbiSerbi ? String(entry.serbiSerbi) : '');
-                } else {
-                    setFormRef(entry.ref || '');
-                    setFormUtang(entry.utang ? String(entry.utang) : '');
-                    setFormPembelian(entry.pembelian ? String(entry.pembelian) : '');
-                    setFormAkunLainnya(entry.akunLainnya ? String(entry.akunLainnya) : '');
-                    setFormKasOut(entry.kasOut != null ? String(entry.kasOut) : String(entry.amount || ''));
-                    setFormPotonganPembelian(entry.potonganPembelian ? String(entry.potonganPembelian) : '');
-                }
-                setShowModal(true);
-            };
-
-            const handleSubmit = async () => {
-                if (!formDate) { showToast("Tanggal wajib diisi!", "error"); return; }
-                setSubmitting(true);
-                let payload = {
-                    date: formDate,
-                    description: formDesc,
-                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                    user: user.email,
-                    updatedAt: window.serverTimestamp(),
-                };
-                if (activeSubTab === 'penerimaan') {
-                    payload.type = 'in';
-                    payload.kas = safeNumber(formKas);
-                    payload.potonganPenjualan = safeNumber(formPotongan);
-                    payload.piutang = safeNumber(formPiutang);
-                    payload.penjualan = safeNumber(formPenjualan);
-                    payload.serbiSerbi = safeNumber(formSerbi);
-                    payload.amount = safeNumber(formKas);
-                } else {
-                    payload.type = 'out';
-                    payload.ref = formRef;
-                    payload.utang = safeNumber(formUtang);
-                    payload.pembelian = safeNumber(formPembelian);
-                    payload.akunLainnya = safeNumber(formAkunLainnya);
-                    payload.kasOut = safeNumber(formKasOut);
-                    payload.potonganPembelian = safeNumber(formPotonganPembelian);
-                    payload.amount = safeNumber(formKasOut);
-                }
-                try {
-                    if (editingId) {
-                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', editingId), payload);
-                        showToast("Data diperbarui");
-                    } else {
-                        payload.createdAt = window.serverTimestamp();
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'), payload);
-                        showToast("Data berhasil disimpan");
-                    }
-                    setShowModal(false);
-                } catch (err) { showToast("Gagal menyimpan data", "error"); }
-                finally { setSubmitting(false); }
-            };
-
-            const handleDelete = async (id) => {
-                if (!confirm("Hapus data ini?")) return;
-                try {
-                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', id));
-                    showToast("Data dihapus");
-                } catch (err) { showToast("Gagal menghapus", "error"); }
-            };
-
-            const juResetForm = () => {
-                setJuFormDate(new Date().toISOString().slice(0,10));
-                setJuFormLines([
-                    { keterangan: '', debit: '', kredit: '' },
-                    { keterangan: '', debit: '', kredit: '' },
-                ]);
-                setJuEditingId(null);
-            };
-
-            const juOpenAdd = () => { juResetForm(); setShowJuModal(true); };
-
-            const juOpenEdit = (entry) => {
-                setJuEditingId(entry.id);
-                setJuFormDate(entry.date);
-                setJuFormLines(entry.lines ? entry.lines.map(l => ({
-                    keterangan: l.keterangan || '',
-                    debit: l.debit ? String(l.debit) : '',
-                    kredit: l.kredit ? String(l.kredit) : '',
-                })) : [{ keterangan:'', debit:'', kredit:'' }]);
-                setShowJuModal(true);
-            };
-
-            const juHandleSubmit = async () => {
-                const validLines = juFormLines.filter(l => l.keterangan.trim() || safeNumber(l.debit) || safeNumber(l.kredit));
-                if (!juFormDate) { showToast("Tanggal wajib diisi!", "error"); return; }
-                if (validLines.length === 0) { showToast("Isi minimal satu baris jurnal!", "error"); return; }
-                const totalDebit  = validLines.reduce((a, l) => a + safeNumber(l.debit), 0);
-                const totalKredit = validLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
-                if (totalDebit !== totalKredit || totalDebit === 0) {
-                    showToast(`Debit (${formatRupiah(totalDebit)}) ≠ Kredit (${formatRupiah(totalKredit)}). Periksa kembali!`, "error");
-                    return;
-                }
-                setJuSubmitting(true);
-                const payload = {
-                    date: juFormDate,
-                    lines: validLines.map(l => ({
-                        keterangan: l.keterangan.trim(),
-                        debit: safeNumber(l.debit),
-                        kredit: safeNumber(l.kredit),
-                    })),
-                    totalDebit,
-                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
-                    user: user.email,
-                    updatedAt: window.serverTimestamp(),
-                };
-                try {
-                    if (juEditingId) {
-                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', juEditingId), payload);
-                        showToast("Jurnal umum diperbarui");
-                    } else {
-                        payload.createdAt = window.serverTimestamp();
-                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'), payload);
-                        showToast("Jurnal umum disimpan");
-                    }
-                    setShowJuModal(false);
-                } catch (err) { showToast("Gagal menyimpan", "error"); }
-                finally { setJuSubmitting(false); }
-            };
-
-            const juHandleDelete = async (id) => {
-                if (!confirm("Hapus entri jurnal umum ini?")) return;
-                try {
-                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', id));
-                    showToast("Data dihapus");
-                } catch (err) { showToast("Gagal menghapus", "error"); }
-            };
-
-            const juAddLine = () => setJuFormLines(prev => [...prev, { keterangan:'', debit:'', kredit:'' }]);
-            const juRemoveLine = (i) => setJuFormLines(prev => prev.filter((_, idx) => idx !== i));
-            const juUpdateLine = (i, field, val) => setJuFormLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
-
-            if (loading || juLoading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
-
-            const isIn = activeSubTab === 'penerimaan';
-            const isJu = activeSubTab === 'jurnal_umum';
-
-            const fJurnal = (n) => n ? formatRupiah(n) : '';
-            const fTglJurnal = (dateStr) => {
-                if (!dateStr) return '';
-                return dateStr.split('-')[2];
-            };
-
-            return (
-                <div className="max-w-5xl mx-auto space-y-4 pb-28">
-                    {/* Header */}
-                    <div>
-                        <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Icon name="scale-balanced" className="text-emerald-600" /> Keuangan
-                        </h1>
-                        <p className="text-[10px] text-slate-500 font-bold">Semua Toko — Data Gabungan</p>
-                    </div>
-
-                    {/* Summary Card */}
-                    <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-4 text-white shadow-lg shadow-green-200">
-                            <p className="text-green-100 text-[10px] font-bold uppercase mb-1">Penerimaan</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.inTotal)}</p>
-                        </div>
-                        <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-2xl p-4 text-white shadow-lg shadow-red-200">
-                            <p className="text-red-100 text-[10px] font-bold uppercase mb-1">Pengeluaran</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.outTotal)}</p>
-                        </div>
-                        <div className={`bg-gradient-to-br ${stats.net >= 0 ? 'from-sky-500 to-blue-600 shadow-blue-200' : 'from-orange-500 to-amber-600 shadow-orange-200'} rounded-2xl p-4 text-white shadow-lg`}>
-                            <p className="text-sky-100 text-[10px] font-bold uppercase mb-1">Selisih</p>
-                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.net)}</p>
-                        </div>
-                    </div>
-
-                    {/* Sub-tab Switch */}
-                    <div className="flex bg-white p-1.5 rounded-xl shadow-sm border border-slate-100">
-                        <button onClick={() => setActiveSubTab('penerimaan')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'penerimaan' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="circle-arrow-down" /> Penerimaan Kas
-                        </button>
-                        <button onClick={() => setActiveSubTab('pengeluaran')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="circle-arrow-up" /> Pengeluaran Kas
-                        </button>
-                        <button onClick={() => setActiveSubTab('jurnal_umum')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'jurnal_umum' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400'}`}>
-                            <Icon name="book-open" /> Jurnal Umum
-                        </button>
-                    </div>
-
-                    {/* Filter Bulan */}
-                    <div className="flex items-center gap-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Periode:</label>
-                        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
-                            className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400" />
-                    </div>
-
-                    {/* ===== PENERIMAAN KAS - JURNAL TABLE ===== */}
-                    {isIn && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-emerald-100 font-bold text-xs mt-0.5">Jurnal Penerimaan Kas</p>
-                                <p className="text-emerald-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-700 font-black" colSpan={2}>Debit</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={3}>Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
-                                        </tr>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Kas</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Pot. Penj.</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Piutang</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Penjualan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Serba-Serbi</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredAsc.length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 7 : 8} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada penerimaan kas
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {filteredAsc.map((entry, idx) => (
-                                            <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.kas != null ? entry.kas : entry.amount)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.potonganPenjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.piutang)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.penjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.serbiSerbi)}</td>
-                                                {!readOnly && (
-                                                    <td className="border border-slate-200 px-1 py-1 text-center">
-                                                        <div className="flex flex-col gap-0.5 items-center">
-                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                        </div>
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {filteredAsc.length > 0 && (
-                                        <tfoot>
-                                            <tr className="bg-gradient-to-r from-emerald-50 to-green-50">
-                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{formatRupiah(jurnalTotals.kas)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{jurnalTotals.potongan ? formatRupiah(jurnalTotals.potongan) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.piutang ? formatRupiah(jurnalTotals.piutang) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotals.penjualan)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.serbi ? formatRupiah(jurnalTotals.serbi) : '-'}</td>
-                                                {!readOnly && <td className="border border-slate-200"></td>}
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={openAdd} className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Penerimaan Kas
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== PENGELUARAN KAS - JURNAL TABLE ===== */}
-                    {!isIn && !isJu && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-red-100 font-bold text-xs mt-0.5">Jurnal Pengeluaran Kas</p>
-                                <p className="text-red-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Ref.</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-700 font-black" colSpan={3}>Debet</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={2}>Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
-                                        </tr>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Utang</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Pembelian</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Akun Lain</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Kas</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Pot. Pemb.</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredOutAsc.length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 8 : 9} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada pengeluaran kas
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {filteredOutAsc.map((entry, idx) => (
-                                            <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-center text-slate-500">{entry.ref || '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.utang)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.pembelian)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.akunLainnya)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.kasOut != null ? entry.kasOut : entry.amount)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.potonganPembelian)}</td>
-                                                {!readOnly && (
-                                                    <td className="border border-slate-200 px-1 py-1 text-center">
-                                                        <div className="flex flex-col gap-0.5 items-center">
-                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                        </div>
-                                                    </td>
-                                                )}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {filteredOutAsc.length > 0 && (
-                                        <tfoot>
-                                            <tr className="bg-gradient-to-r from-red-50 to-rose-50">
-                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.utang ? formatRupiah(jurnalTotalsOut.utang) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.pembelian)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.akunLainnya ? formatRupiah(jurnalTotalsOut.akunLainnya) : '-'}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.kas)}</td>
-                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotalsOut.potonganPembelian ? formatRupiah(jurnalTotalsOut.potonganPembelian) : '-'}</td>
-                                                {!readOnly && <td className="border border-slate-200"></td>}
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={openAdd} className="w-full py-3 bg-gradient-to-r from-red-500 to-rose-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Pengeluaran Kas
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== JURNAL UMUM ===== */}
-                    {isJu && (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                            <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-3 text-center">
-                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
-                                <p className="text-violet-100 font-bold text-xs mt-0.5">Jurnal Umum</p>
-                                <p className="text-violet-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
-                            </div>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-[11px] border-collapse min-w-[500px]">
-                                    <thead>
-                                        <tr className="bg-slate-50">
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold">Tgl</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-left text-slate-600 font-bold">Keterangan / Akun</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-violet-700 font-black">Debit</th>
-                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black">Kredit</th>
-                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold">•</th>}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {juEntries.filter(e => e.date && e.date.startsWith(filterMonth)).length === 0 && (
-                                            <tr>
-                                                <td colSpan={readOnly ? 4 : 5} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
-                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
-                                                    Belum ada jurnal umum
-                                                </td>
-                                            </tr>
-                                        )}
-                                        {juEntries.filter(e => e.date && e.date.startsWith(filterMonth)).map((entry) => (
-                                            entry.lines && entry.lines.map((line, li) => (
-                                                <tr key={`${entry.id}-${li}`} className="hover:bg-violet-50/30 transition-colors">
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">{li === 0 ? fTglJurnal(entry.date) : ''}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-slate-700">{line.keterangan}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-violet-700 whitespace-nowrap">{fJurnal(line.debit)}</td>
-                                                    <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(line.kredit)}</td>
-                                                    {!readOnly && (
-                                                        <td className="border border-slate-200 px-1 py-1 text-center" rowSpan={li === 0 ? entry.lines.length : undefined} style={{display: li === 0 ? '' : 'none'}}>
-                                                            <div className="flex flex-col gap-0.5 items-center">
-                                                                <button onClick={() => juOpenEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
-                                                                <button onClick={() => juHandleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
-                                                            </div>
-                                                        </td>
-                                                    )}
-                                                </tr>
-                                            ))
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {!readOnly && (
-                                <div className="p-4 border-t border-slate-100">
-                                    <button onClick={juOpenAdd} className="w-full py-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md hover:shadow-lg transition-all active:scale-95">
-                                        <Icon name="plus" /> Tambah Jurnal Umum
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* ===== MODAL JURNAL UMUM ===== */}
-                    {showJuModal && (() => {
-                        const juLiveTotalDebit  = juFormLines.reduce((a, l) => a + safeNumber(l.debit), 0);
-                        const juLiveTotalKredit = juFormLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
-                        const juBalanced = juLiveTotalDebit === juLiveTotalKredit && juLiveTotalDebit > 0;
-                        return (
-                            <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
-                                <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                                    <div className="p-5 flex-shrink-0 bg-gradient-to-r from-violet-600 to-purple-600">
-                                        <h3 className="font-bold text-white text-base flex items-center gap-2">
-                                            <Icon name="book-open" />
-                                            {juEditingId ? 'Edit' : 'Tambah'} Jurnal Umum
-                                        </h3>
-                                        <p className="text-violet-200 text-[10px] mt-1 font-medium">Debit harus sama dengan Kredit</p>
-                                    </div>
-                                    <div className="p-4 space-y-3 overflow-y-auto flex-1">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal Transaksi</label>
-                                            <input type="date" value={juFormDate} onChange={e => setJuFormDate(e.target.value)}
-                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-violet-400" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <div className="flex items-center gap-2">
-                                                <div className="h-px flex-1 bg-violet-100"></div>
-                                                <span className="text-[10px] font-black text-violet-600 uppercase">Baris Jurnal</span>
-                                                <div className="h-px flex-1 bg-violet-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-[1fr_90px_90px_24px] gap-1 text-[9px] font-black text-slate-400 uppercase px-1">
-                                                <span>Keterangan / Akun</span>
-                                                <span className="text-center text-violet-600">Debit</span>
-                                                <span className="text-center text-sky-600">Kredit</span>
-                                                <span></span>
-                                            </div>
-                                            {juFormLines.map((line, i) => (
-                                                <div key={i} className="grid grid-cols-[1fr_90px_90px_24px] gap-1 items-center">
-                                                    <input type="text" placeholder={i === 0 ? "Mis: Kas..." : "Mis: Modal..."} value={line.keterangan} onChange={e => juUpdateLine(i, 'keterangan', e.target.value)} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:border-violet-400 w-full" />
-                                                    <input type="number" placeholder="0" value={line.debit} onChange={e => juUpdateLine(i, 'debit', e.target.value)} className="p-2 bg-violet-50 border border-violet-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-violet-500 w-full" />
-                                                    <input type="number" placeholder="0" value={line.kredit} onChange={e => juUpdateLine(i, 'kredit', e.target.value)} className="p-2 bg-sky-50 border border-sky-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-sky-500 w-full" />
-                                                    <button onClick={() => juRemoveLine(i)} disabled={juFormLines.length <= 2} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-400 disabled:opacity-20 transition-colors text-xs"><Icon name="xmark" /></button>
-                                                </div>
-                                            ))}
-                                            <button onClick={juAddLine} className="w-full py-2 border-2 border-dashed border-violet-200 text-violet-400 hover:border-violet-400 hover:text-violet-600 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1">
-                                                <Icon name="plus" /> Tambah Baris
-                                            </button>
-                                        </div>
-                                        {(juLiveTotalDebit > 0 || juLiveTotalKredit > 0) && (
-                                            <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${juBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                <span><Icon name={juBalanced ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(juLiveTotalDebit)}</span>
-                                                <span>Kredit: {formatRupiah(juLiveTotalKredit)}</span>
-                                                {!juBalanced && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(juLiveTotalDebit - juLiveTotalKredit))}</span>}
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="p-4 flex gap-2 flex-shrink-0 border-t border-slate-100">
-                                        <button onClick={() => setShowJuModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Batal</button>
-                                        <button onClick={juHandleSubmit} disabled={juSubmitting} className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors">
-                                            {juSubmitting ? 'Menyimpan...' : (juEditingId ? 'Perbarui' : 'Simpan')}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })()}
-
-                    {/* ===== MODAL ADD/EDIT ===== */}
-                    {showModal && (
-                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
-                            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-                                <div className={`p-5 flex-shrink-0 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
-                                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                                        <Icon name={isIn ? "circle-arrow-down" : "circle-arrow-up"} />
-                                        {editingId ? 'Edit' : 'Tambah'} {isIn ? 'Penerimaan Kas' : 'Pengeluaran Kas'}
-                                    </h3>
-                                    {isIn && <p className="text-emerald-100 text-[10px] mt-1 font-medium">Isi kolom jurnal sesuai transaksi</p>}
-                                </div>
-                                <div className="p-5 space-y-3 overflow-y-auto flex-1">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
-                                            <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
-                                            <input type="text" placeholder="Mis: Penjualan tunai..." value={formDesc} onChange={e => setFormDesc(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
-                                        </div>
-                                    </div>
-                                    {isIn && (
-                                        <>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-emerald-100"></div>
-                                                <span className="text-[10px] font-black text-emerald-600 uppercase">Debit</span>
-                                                <div className="h-px flex-1 bg-emerald-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Kas</label>
-                                                    <input type="number" placeholder="0" value={formKas} onChange={e => setFormKas(e.target.value)} className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Potongan Penjualan</label>
-                                                    <input type="number" placeholder="0" value={formPotongan} onChange={e => setFormPotongan(e.target.value)} className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Piutang</label>
-                                                    <input type="number" placeholder="0" value={formPiutang} onChange={e => setFormPiutang(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Penjualan</label>
-                                                    <input type="number" placeholder="0" value={formPenjualan} onChange={e => setFormPenjualan(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Serba-Serbi</label>
-                                                <input type="number" placeholder="0" value={formSerbi} onChange={e => setFormSerbi(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                            </div>
-                                            {(formKas || formPotongan || formPiutang || formPenjualan || formSerbi) && (() => {
-                                                const d = safeNumber(formKas) + safeNumber(formPotongan);
-                                                const k = safeNumber(formPiutang) + safeNumber(formPenjualan) + safeNumber(formSerbi);
-                                                const ok = d === k && d > 0;
-                                                return (
-                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(d)}</span>
-                                                        <span>Kredit: {formatRupiah(k)}</span>
-                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </>
-                                    )}
-                                    {!isIn && (
-                                        <>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Ref. (opsional)</label>
-                                                <input type="text" placeholder="No. referensi..." value={formRef} onChange={e => setFormRef(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400" />
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-red-100"></div>
-                                                <span className="text-[10px] font-black text-red-600 uppercase">Debet</span>
-                                                <div className="h-px flex-1 bg-red-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Utang</label>
-                                                    <input type="number" placeholder="0" value={formUtang} onChange={e => setFormUtang(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Pembelian</label>
-                                                    <input type="number" placeholder="0" value={formPembelian} onChange={e => setFormPembelian(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Akun Lainnya</label>
-                                                <input type="number" placeholder="0" value={formAkunLainnya} onChange={e => setFormAkunLainnya(e.target.value)} className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
-                                            </div>
-                                            <div className="flex items-center gap-2 pt-1">
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
-                                                <div className="h-px flex-1 bg-sky-100"></div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Kas</label>
-                                                    <input type="number" placeholder="0" value={formKasOut} onChange={e => setFormKasOut(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Pot. Pembelian</label>
-                                                    <input type="number" placeholder="0" value={formPotonganPembelian} onChange={e => setFormPotonganPembelian(e.target.value)} className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
-                                                </div>
-                                            </div>
-                                            {(formUtang || formPembelian || formAkunLainnya || formKasOut || formPotonganPembelian) && (() => {
-                                                const d = safeNumber(formUtang) + safeNumber(formPembelian) + safeNumber(formAkunLainnya);
-                                                const k = safeNumber(formKasOut) + safeNumber(formPotonganPembelian);
-                                                const ok = d === k && d > 0;
-                                                return (
-                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debet: {formatRupiah(d)}</span>
-                                                        <span>Kredit: {formatRupiah(k)}</span>
-                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
-                                                    </div>
-                                                );
-                                            })()}
-                                        </>
-                                    )}
-                                    <div className="flex gap-2 pt-2">
-                                        <button onClick={() => setShowModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">Batal</button>
-                                        <button onClick={handleSubmit} disabled={submitting} className={`flex-1 py-3 ${isIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'} text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors`}>
-                                            {submitting ? 'Menyimpan...' : (editingId ? 'Perbarui' : 'Simpan')}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
-
-
         // --- CASHIER COMPONENT ---
         // =============================================
         // ITEM NOTE MODAL - Kartu Catatan Barang
@@ -6804,7 +6051,8 @@
                                     });
                                 } else {
                                     const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
-                                    batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() });
+                                    const deductQty = item.cartQty * (item.packageQtyPerUnit || 1);
+                                    batch.update(docRef, { [stockField]: window.increment(-deductQty), updatedAt: window.serverTimestamp() });
                                 }
                             });
                             // Simpan transaksi dengan coTime (waktu checkout saat offline)
@@ -6878,7 +6126,7 @@
             const cashierName = authSession?.namaLengkap || authSession?.username || 'Kasir';
             const [activeCartId, setActiveCartId] = useState(null);
             const [originalCashierName, setOriginalCashierName] = useState(null); // Nama kasir asli pemilik keranjang
-            const [priceModal, setPriceModal] = useState({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0 }); // Modal pilih harga
+            const [priceModal, setPriceModal] = useState({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0, packageQtyPerUnit: 1 }); // Modal pilih harga
             const [editingCartItem, setEditingCartItem] = useState(null); // Track item yang sedang diedit dari cart
             
             // --- RACIKAN / RESEP STATE ---
@@ -7529,7 +6777,8 @@
                     selectedUnit: defaultUnit,
                     qty: 1,
                     discountType: item.defaultDiscountType || '%',
-                    discountValue: item.defaultDiscount || 0
+                    discountValue: item.defaultDiscount || 0,
+                    packageQtyPerUnit: 1
                 });
             };
             
@@ -7562,12 +6811,13 @@
                     selectedUnit: cartItem.selectedUnit || cartItem.unit,
                     qty: cartItem.cartQty,
                     discountType: cartItem.discount?.type || '%',
-                    discountValue: cartItem.discount?.value || 0
+                    discountValue: cartItem.discount?.value || 0,
+                    packageQtyPerUnit: cartItem.packageQtyPerUnit || 1
                 });
             };
             
             const addToCartWithPrice = () => {
-                const { item, selectedPrice, selectedUnit, qty, discountType, discountValue } = priceModal;
+                const { item, selectedPrice, selectedUnit, qty, discountType, discountValue, packageQtyPerUnit } = priceModal;
                 
                 const finalQty = typeof qty === 'string' && qty === '' ? 1 : parseInt(qty) || 1;
                 
@@ -7585,6 +6835,8 @@
                         finalPrice = selectedPrice - discountValue;
                     }
                 }
+                
+                const pkgQty = packageQtyPerUnit || 1;
                 
                 // Jika sedang mengedit item yang sudah ada di cart
                 if (editingCartItem) {
@@ -7618,13 +6870,14 @@
                                 price: finalPrice, 
                                 selectedUnit: selectedUnit, 
                                 originalPrice: selectedPrice, 
+                                packageQtyPerUnit: pkgQty,
                                 discount: discountValue > 0 ? { type: discountType, value: discountValue } : null 
                             }];
                         }
                     });
                     
                     setEditingCartItem(null);
-                    setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0 });
+                    setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0, packageQtyPerUnit: 1 });
                     setSearch('');
                     showToast("Item diperbarui");
                     return;
@@ -7636,10 +6889,10 @@
                     if (existing) {
                         return prev.map(c => (c.id === item.id && c.selectedUnit === selectedUnit && c.price === finalPrice) ? { ...c, cartQty: c.cartQty + finalQty } : c);
                     }
-                    return [...prev, { ...item, cartQty: finalQty, price: finalPrice, selectedUnit: selectedUnit, originalPrice: selectedPrice, discount: discountValue > 0 ? { type: discountType, value: discountValue } : null }];
+                    return [...prev, { ...item, cartQty: finalQty, price: finalPrice, selectedUnit: selectedUnit, originalPrice: selectedPrice, packageQtyPerUnit: pkgQty, discount: discountValue > 0 ? { type: discountType, value: discountValue } : null }];
                 });
                 
-                setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0 });
+                setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0, packageQtyPerUnit: 1 });
                 setSearch('');
                 showToast("Ditambahkan ke keranjang");
             };
@@ -7755,7 +7008,8 @@
                                        (c.id === id);
                     if (matchesItem) { 
                         const newQty = c.cartQty + delta; 
-                        if (!c.isRacikanGroup && newQty > c.qty) { showToast("Stok mentok!", "error"); return c; } 
+                        const maxAllowed = Math.floor(c.qty / (c.packageQtyPerUnit || 1));
+                        if (!c.isRacikanGroup && newQty > maxAllowed) { showToast("Stok mentok!", "error"); return c; } 
                         if (newQty < 1) return c; 
                         return { ...c, cartQty: newQty }; 
                     }
@@ -7893,7 +7147,8 @@
                         } else {
                             // Item biasa
                             const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'inventory', item.id);
-                            batch.update(docRef, { [stockField]: window.increment(-item.cartQty), updatedAt: window.serverTimestamp() });
+                            const deductQty = item.cartQty * (item.packageQtyPerUnit || 1);
+                            batch.update(docRef, { [stockField]: window.increment(-deductQty), updatedAt: window.serverTimestamp() });
                         }
                     });
 
@@ -8403,7 +7658,7 @@
                                         <div className="divide-y divide-slate-100 max-h-[312px] overflow-y-auto custom-scrollbar">
                                             {filteredItems.map(item => {
                                                 const inCart = cart.find(c => c.id === item.id);
-                                                const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty : 0);
+                                                const currentStock = safeNumber(item.qty) - (inCart ? inCart.cartQty * (inCart.packageQtyPerUnit || 1) : 0);
                                                 const isOOS = currentStock <= 0;
                                                 const isDisabled = isOOS && !allowZeroStockCO;
                                                 const highlightName = (name, query) => {
@@ -8541,7 +7796,7 @@
                     </div>
                     <div className="w-full md:w-80 lg:w-96 flex flex-col bg-white rounded-3xl shadow-soft border border-slate-100 h-fit md:h-full max-h-[calc(100vh-100px)]">
                         <div className="p-4 border-b border-slate-100 bg-slate-50/50 rounded-t-3xl flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Icon name="cart-shopping" className="text-sky-600" /> Keranjang</h3><span className="text-xs font-bold bg-sky-100 text-sky-700 px-2 py-1 rounded-full">{cart.length} Item</span></div>
-                        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar min-h-[200px]">{cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><Icon name="basket-shopping" className="text-4xl mb-2" /><p className="text-xs font-medium">Keranjang Kosong</p></div>) : (cart.map(item => (<div key={item.id + (item.selectedUnit || '') + (item.price || '')} onClick={() => editCartItem(item)} className={`p-3 rounded-xl border flex gap-3 group relative cursor-pointer transition-all ${item.isRacikan ? 'bg-teal-50 border-teal-100 hover:bg-teal-100 hover:border-teal-300' : 'bg-slate-50 border-slate-100 hover:bg-sky-50 hover:border-sky-300'}`}><div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="pen-to-square" className="text-[10px] text-sky-500" /></div><div className="flex-1 min-w-0"><div className="flex items-center gap-1.5 flex-wrap"><h4 className={"text-xs font-bold text-slate-700 " + (item.isRacikanGroup ? "line-clamp-2" : "truncate")}>{item.name}</h4>{item.isRacikan && <span className="text-[8px] font-black bg-teal-600 text-white px-1 py-0.5 rounded flex-shrink-0">R/</span>}{item.isKonsinyasi && <span className="text-[8px] font-black bg-fuchsia-100 text-fuchsia-700 px-1 py-0.5 rounded flex-shrink-0 border border-fuchsia-200">konsinyasi</span>}</div>{item.isRacikanGroup ? (<p className="text-[9px] text-teal-600 font-bold mt-0.5"><Icon name="pen-to-square" className="text-[9px] mr-0.5" />Klik untuk edit racikan</p>) : (<p className="text-[10px] text-slate-500">{formatRupiah(item.originalPrice || item.price)} {item.selectedUnit ? `per ${item.selectedUnit}` : ''} x {item.cartQty}</p>)}{item.discount && <p className="text-[9px] text-red-500 font-bold">Diskon: {item.discount.type === '%' ? `${item.discount.value}%` : formatRupiah(item.discount.value)}</p>}{settings?.showNoteButton !== false && item.itemNote && (<button onClick={e => { e.stopPropagation(); setNoteModalItem(item); }} title="Lihat catatan barang" className="mt-0.5 flex items-center gap-1 text-[9px] text-sky-600 font-bold bg-sky-50 hover:bg-sky-100 active:bg-sky-200 px-1.5 py-0.5 rounded-full border border-sky-200 transition-colors max-w-[120px] truncate"><Icon name="circle-info" className="text-[9px] flex-shrink-0" /><span className="truncate">{item.itemNote.length > 18 ? item.itemNote.slice(0, 18) + '…' : item.itemNote}</span></button>)}</div><div className="flex flex-col items-end gap-1"><p className="text-xs font-bold text-slate-800">{formatRupiah(item.price * item.cartQty)}</p><div className="flex items-center gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5" onClick={e => e.stopPropagation()}><button onClick={() => updateQty(item.id, -1, item.selectedUnit, item.price)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="minus" /></button><span className="text-xs font-bold w-4 text-center">{item.cartQty}</span><button onClick={() => updateQty(item.id, 1, item.selectedUnit, item.price)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="plus" /></button></div></div></div>)))}</div>
+                        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar min-h-[200px]">{cart.length === 0 ? (<div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-60"><Icon name="basket-shopping" className="text-4xl mb-2" /><p className="text-xs font-medium">Keranjang Kosong</p></div>) : (cart.map(item => (<div key={item.id + (item.selectedUnit || '') + (item.price || '')} onClick={() => editCartItem(item)} className={`p-3 rounded-xl border flex gap-3 group relative cursor-pointer transition-all ${item.isRacikan ? 'bg-teal-50 border-teal-100 hover:bg-teal-100 hover:border-teal-300' : 'bg-slate-50 border-slate-100 hover:bg-sky-50 hover:border-sky-300'}`}><div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="pen-to-square" className="text-[10px] text-sky-500" /></div><div className="flex-1 min-w-0"><div className="flex items-center gap-1.5 flex-wrap"><h4 className={"text-xs font-bold text-slate-700 " + (item.isRacikanGroup ? "line-clamp-2" : "truncate")}>{item.name}</h4>{item.isRacikan && <span className="text-[8px] font-black bg-teal-600 text-white px-1 py-0.5 rounded flex-shrink-0">R/</span>}{item.isKonsinyasi && <span className="text-[8px] font-black bg-fuchsia-100 text-fuchsia-700 px-1 py-0.5 rounded flex-shrink-0 border border-fuchsia-200">konsinyasi</span>}{item.packageQtyPerUnit > 1 && <span className="text-[8px] font-black bg-amber-100 text-amber-700 px-1 py-0.5 rounded flex-shrink-0 border border-amber-200">📦 {item.selectedUnit}</span>}</div>{item.isRacikanGroup ? (<p className="text-[9px] text-teal-600 font-bold mt-0.5"><Icon name="pen-to-square" className="text-[9px] mr-0.5" />Klik untuk edit racikan</p>) : (<p className="text-[10px] text-slate-500">{formatRupiah(item.originalPrice || item.price)} {item.selectedUnit ? `per ${item.selectedUnit}` : ''} x {item.cartQty}{item.packageQtyPerUnit > 1 ? ` (= ${item.cartQty * item.packageQtyPerUnit} ${item.unit})` : ''}</p>)}{item.discount && <p className="text-[9px] text-red-500 font-bold">Diskon: {item.discount.type === '%' ? `${item.discount.value}%` : formatRupiah(item.discount.value)}</p>}{settings?.showNoteButton !== false && item.itemNote && (<button onClick={e => { e.stopPropagation(); setNoteModalItem(item); }} title="Lihat catatan barang" className="mt-0.5 flex items-center gap-1 text-[9px] text-sky-600 font-bold bg-sky-50 hover:bg-sky-100 active:bg-sky-200 px-1.5 py-0.5 rounded-full border border-sky-200 transition-colors max-w-[120px] truncate"><Icon name="circle-info" className="text-[9px] flex-shrink-0" /><span className="truncate">{item.itemNote.length > 18 ? item.itemNote.slice(0, 18) + '…' : item.itemNote}</span></button>)}</div><div className="flex flex-col items-end gap-1"><p className="text-xs font-bold text-slate-800">{formatRupiah(item.price * item.cartQty)}</p><div className="flex items-center gap-1 bg-white rounded-lg shadow-sm border border-slate-200 p-0.5" onClick={e => e.stopPropagation()}><button onClick={() => updateQty(item.id, -1, item.selectedUnit, item.price)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="minus" /></button><span className="text-xs font-bold w-4 text-center">{item.cartQty}</span><button onClick={() => updateQty(item.id, 1, item.selectedUnit, item.price)} className="w-5 h-5 flex items-center justify-center text-[8px] hover:bg-slate-100 rounded text-slate-500"><Icon name="plus" /></button></div></div></div>)))}</div>
                         <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-3xl">
                             {/* Subtotal, Diskon, Biaya Pengiriman, Total */}
                             <div className="space-y-2 mb-3">
@@ -9285,7 +8540,7 @@
                             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
                                 {/* Header */}
                                 <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-                                    <button onClick={() => { setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0 }); setEditingCartItem(null); }} className="text-slate-600 hover:text-slate-800">
+                                    <button onClick={() => { setPriceModal({ show: false, item: null, selectedPrice: 0, selectedUnit: '', qty: 1, discountType: '%', discountValue: 0, packageQtyPerUnit: 1 }); setEditingCartItem(null); }} className="text-slate-600 hover:text-slate-800">
                                         <Icon name="arrow-left" className="text-xl" />
                                     </button>
                                     <div className="flex items-center gap-2">
@@ -9300,6 +8555,12 @@
                                     <div className="mb-6">
                                         <h2 className="text-xl font-bold text-slate-800 mb-1">{priceModal.item.name}</h2>
                                         <p className="text-sm text-slate-500">Stok {priceModal.item.qty} {priceModal.item.unit}</p>
+                                        {priceModal.packageQtyPerUnit > 1 && (
+                                            <div className="mt-1.5 inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1">
+                                                <Icon name="box-open" className="text-amber-500 text-xs" />
+                                                <span className="text-xs font-bold text-amber-700">Paket: {priceModal.selectedUnit} — stok berkurang {priceModal.qty * (priceModal.packageQtyPerUnit || 1)} {priceModal.item.unit}</span>
+                                            </div>
+                                        )}
                                     </div>
                                     
                                     {/* Harga Display */}
@@ -9346,21 +8607,28 @@
                                             />
                                             <div className="relative w-32">
                                                 <select 
-                                                    value={priceModal.selectedUnit ? `${priceModal.selectedUnit}|${priceModal.selectedPrice}` : ''} 
+                                                    value={priceModal.selectedUnit ? `${priceModal.selectedUnit}|${priceModal.selectedPrice}|${priceModal.packageQtyPerUnit || 1}` : ''} 
                                                     onChange={e => {
                                                         if (e.target.value) {
-                                                            const [unit, price] = e.target.value.split('|');
-                                                            setPriceModal({...priceModal, selectedUnit: unit, selectedPrice: parseFloat(price)});
+                                                            const parts = e.target.value.split('|');
+                                                            const unit = parts[0];
+                                                            const price = parseFloat(parts[1]);
+                                                            const pkgQty = parseInt(parts[2]) || 1;
+                                                            setPriceModal({...priceModal, selectedUnit: unit, selectedPrice: price, packageQtyPerUnit: pkgQty});
                                                         }
                                                     }}
                                                     className="w-full p-3 rounded-xl border-2 border-slate-200 focus:border-teal-500 outline-none appearance-none font-bold text-slate-700 bg-white"
                                                 >
                                                     {priceModal.item.price > 0 && (
-                                                        <option value={`${priceModal.item.unit}|${priceModal.item.price}`}>
+                                                        <option value={`${priceModal.item.unit}|${priceModal.item.price}|1`}>
                                                             {priceModal.item.unit} - {formatRupiah(priceModal.item.price)}
                                                         </option>
                                                     )}
-
+                                                    {(priceModal.item.packagePrices || []).map((pkg, idx) => (
+                                                        <option key={idx} value={`${pkg.name} (${pkg.qty} ${priceModal.item.unit})|${pkg.price}|${pkg.qty}`}>
+                                                            {pkg.name} (isi {pkg.qty}) - {formatRupiah(pkg.price)}
+                                                        </option>
+                                                    ))}
                                                 </select>
                                                 <Icon name="chevron-down" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                             </div>
@@ -10448,6 +9716,876 @@
             );
         };
 
+
+        const KeuanganView = ({ user, currentProfile, showToast, readOnly }) => {
+            const [activeSubTab, setActiveSubTab] = useState('penerimaan'); // 'penerimaan' | 'pengeluaran' | 'jurnal_umum'
+            const [entries, setEntries] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            // ===== JURNAL UMUM STATE =====
+            const [juEntries, setJuEntries] = useState([]);
+            const [juLoading, setJuLoading] = useState(true);
+            const [showJuModal, setShowJuModal] = useState(false);
+            const [juSubmitting, setJuSubmitting] = useState(false);
+            const [juEditingId, setJuEditingId] = useState(null);
+            const [juFormDate, setJuFormDate] = useState(new Date().toISOString().slice(0, 10));
+            const [juFormLines, setJuFormLines] = useState([
+                { keterangan: '', debit: '', kredit: '' },
+                { keterangan: '', debit: '', kredit: '' },
+            ]);
+
+            // Form state (shared)
+            const [showModal, setShowModal] = useState(false);
+            const [submitting, setSubmitting] = useState(false);
+            const [formDesc, setFormDesc]     = useState('');
+            const [formDate, setFormDate]     = useState(new Date().toISOString().slice(0, 10));
+            const [formCategory, setFormCategory] = useState('');
+            const [formAmount, setFormAmount] = useState(''); // untuk pengeluaran
+            const [editingId, setEditingId]   = useState(null);
+
+            // Form state khusus Penerimaan Kas (Jurnal)
+            const [formKas, setFormKas]                 = useState(''); // Debit: Kas
+            const [formPotongan, setFormPotongan]       = useState(''); // Debit: Potongan Penjualan
+            const [formPiutang, setFormPiutang]         = useState(''); // Kredit: Piutang
+            const [formPenjualan, setFormPenjualan]     = useState(''); // Kredit: Penjualan
+            const [formSerbi, setFormSerbi]             = useState(''); // Kredit: Serba-Serbi
+
+            // Form state khusus Pengeluaran Kas (Jurnal)
+            const [formRef, setFormRef]                         = useState(''); // Ref.
+            const [formUtang, setFormUtang]                     = useState(''); // Debit: Utang
+            const [formPembelian, setFormPembelian]             = useState(''); // Debit: Pembelian
+            const [formAkunLainnya, setFormAkunLainnya]         = useState(''); // Debit: Akun Lainnya
+            const [formKasOut, setFormKasOut]                   = useState(''); // Kredit: Kas
+            const [formPotonganPembelian, setFormPotonganPembelian] = useState(''); // Kredit: Potongan Pembelian
+
+            // Filter bulan
+            const thisMonth = new Date().toISOString().slice(0, 7);
+            const [filterMonth, setFilterMonth] = useState(thisMonth);
+
+            const CATEGORIES_OUT = ['Pembelian Obat', 'Gaji Karyawan', 'Listrik & Air', 'Sewa Tempat', 'ATK & Perlengkapan', 'Biaya Operasional', 'Pengeluaran Lain'];
+
+            useEffect(() => {
+                if (!user) return;
+                const q = window.query(
+                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'),
+                    window.orderBy('date', 'desc'),
+                    window.limit(300)
+                );
+                const unsub = window.onSnapshot(q, (snapshot) => {
+                    // Keuangan: selalu tampilkan SEMUA toko (tidak difilter per profil)
+                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setEntries(all);
+                    setLoading(false);
+                });
+                return () => unsub();
+            }, [user]);
+
+            // Listener Jurnal Umum
+            useEffect(() => {
+                if (!user) return;
+                const q = window.query(
+                    window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'),
+                    window.orderBy('date', 'desc'),
+                    window.limit(500)
+                );
+                const unsub = window.onSnapshot(q, (snapshot) => {
+                    // Jurnal Umum: selalu tampilkan SEMUA toko (tidak difilter per profil)
+                    const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setJuEntries(all);
+                    setJuLoading(false);
+                });
+                return () => unsub();
+            }, [user]);
+
+            const currentType = activeSubTab === 'penerimaan' ? 'in' : 'out';
+
+            const filtered = entries.filter(e => e.type === currentType && e.date && e.date.startsWith(filterMonth));
+            // Urutkan ascending untuk penerimaan (tampilan jurnal)
+            const filteredAsc = activeSubTab === 'penerimaan' ? [...filtered].sort((a, b) => a.date.localeCompare(b.date)) : filtered;
+
+            const stats = React.useMemo(() => {
+                const inTotal  = entries.filter(e => e.type === 'in'  && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kas || b.amount), 0);
+                const outTotal = entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth)).reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0);
+                return { inTotal, outTotal, net: inTotal - outTotal };
+            }, [entries, filterMonth]);
+
+            // Totals untuk footer jurnal penerimaan
+            const jurnalTotals = React.useMemo(() => ({
+                kas:      filteredAsc.reduce((a, b) => a + safeNumber(b.kas || b.amount), 0),
+                potongan: filteredAsc.reduce((a, b) => a + safeNumber(b.potonganPenjualan), 0),
+                piutang:  filteredAsc.reduce((a, b) => a + safeNumber(b.piutang), 0),
+                penjualan:filteredAsc.reduce((a, b) => a + safeNumber(b.penjualan), 0),
+                serbi:    filteredAsc.reduce((a, b) => a + safeNumber(b.serbiSerbi), 0),
+            }), [filteredAsc]);
+
+            // Data pengeluaran ascending untuk jurnal
+            const filteredOutAsc = [...entries.filter(e => e.type === 'out' && e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
+
+            // Totals untuk footer jurnal pengeluaran
+            const jurnalTotalsOut = React.useMemo(() => ({
+                utang:             filteredOutAsc.reduce((a, b) => a + safeNumber(b.utang), 0),
+                pembelian:         filteredOutAsc.reduce((a, b) => a + safeNumber(b.pembelian), 0),
+                akunLainnya:       filteredOutAsc.reduce((a, b) => a + safeNumber(b.akunLainnya), 0),
+                kas:               filteredOutAsc.reduce((a, b) => a + safeNumber(b.kasOut != null ? b.kasOut : b.amount), 0),
+                potonganPembelian: filteredOutAsc.reduce((a, b) => a + safeNumber(b.potonganPembelian), 0),
+            }), [filteredOutAsc]);
+
+            const formatBulanIndo = (ym) => {
+                if (!ym) return '';
+                const [y, m] = ym.split('-');
+                const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+                return `${bulan[parseInt(m,10)-1]} ${y}`;
+            };
+
+            const resetInForm = () => { setFormKas(''); setFormPotongan(''); setFormPiutang(''); setFormPenjualan(''); setFormSerbi(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
+            const resetOutForm = () => { setFormRef(''); setFormUtang(''); setFormPembelian(''); setFormAkunLainnya(''); setFormKasOut(''); setFormPotonganPembelian(''); setFormDesc(''); setFormDate(new Date().toISOString().slice(0,10)); };
+
+            const openAdd = () => {
+                setEditingId(null);
+                resetInForm();
+                resetOutForm();
+                setFormAmount(''); setFormCategory('');
+                setShowModal(true);
+            };
+
+            const openEdit = (entry) => {
+                setEditingId(entry.id);
+                setFormDate(entry.date);
+                setFormDesc(entry.description);
+                if (entry.type === 'in') {
+                    setFormKas(entry.kas != null ? String(entry.kas) : String(entry.amount || ''));
+                    setFormPotongan(entry.potonganPenjualan != null ? String(entry.potonganPenjualan) : '');
+                    setFormPiutang(entry.piutang != null ? String(entry.piutang) : '');
+                    setFormPenjualan(entry.penjualan != null ? String(entry.penjualan) : '');
+                    setFormSerbi(entry.serbiSerbi != null ? String(entry.serbiSerbi) : '');
+                } else {
+                    setFormRef(entry.ref || '');
+                    setFormUtang(entry.utang != null ? String(entry.utang) : '');
+                    setFormPembelian(entry.pembelian != null ? String(entry.pembelian) : '');
+                    setFormAkunLainnya(entry.akunLainnya != null ? String(entry.akunLainnya) : '');
+                    setFormKasOut(entry.kasOut != null ? String(entry.kasOut) : String(entry.amount || ''));
+                    setFormPotonganPembelian(entry.potonganPembelian != null ? String(entry.potonganPembelian) : '');
+                    setFormAmount(String(entry.amount));
+                    setFormCategory(entry.category || '');
+                }
+                setShowModal(true);
+            };
+
+            const handleSubmit = async () => {
+                if (!formDate || !formDesc) { showToast("Tanggal & keterangan wajib diisi!", "error"); return; }
+                setSubmitting(true);
+                let payload;
+                if (activeSubTab === 'penerimaan') {
+                    const kas = safeNumber(formKas);
+                    const potongan = safeNumber(formPotongan);
+                    const piutang = safeNumber(formPiutang);
+                    const penjualan = safeNumber(formPenjualan);
+                    const serbi = safeNumber(formSerbi);
+                    // Validasi: Debit = Kredit
+                    const totalDebit = kas + potongan;
+                    const totalKredit = piutang + penjualan + serbi;
+                    if (totalDebit === 0) { showToast("Isi minimal satu kolom Debit!", "error"); setSubmitting(false); return; }
+                    payload = {
+                        type: 'in',
+                        amount: kas, // backward compat
+                        kas, potonganPenjualan: potongan, piutang, penjualan, serbiSerbi: serbi,
+                        description: formDesc,
+                        date: formDate,
+                        storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                        user: user.email,
+                        updatedAt: window.serverTimestamp()
+                    };
+                } else {
+                    const kasOut = safeNumber(formKasOut);
+                    const potonganPembelian = safeNumber(formPotonganPembelian);
+                    const utang = safeNumber(formUtang);
+                    const pembelian = safeNumber(formPembelian);
+                    const akunLainnya = safeNumber(formAkunLainnya);
+                    // Jika pakai format jurnal baru
+                    const totalDebitOut = utang + pembelian + akunLainnya;
+                    const totalKreditOut = kasOut + potonganPembelian;
+                    // amount = kasOut untuk backward compat (atau total kredit)
+                    const amountOut = kasOut || totalDebitOut || safeNumber(formAmount);
+                    if (amountOut === 0 && totalDebitOut === 0) { showToast("Isi minimal satu kolom jurnal!", "error"); setSubmitting(false); return; }
+                    payload = {
+                        type: 'out',
+                        amount: amountOut,
+                        ref: formRef,
+                        utang, pembelian, akunLainnya,
+                        kasOut, potonganPembelian,
+                        description: formDesc,
+                        category: formCategory,
+                        date: formDate,
+                        storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                        user: user.email,
+                        updatedAt: window.serverTimestamp()
+                    };
+                }
+                try {
+                    if (editingId) {
+                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', editingId), payload);
+                        showToast("Data berhasil diperbarui");
+                    } else {
+                        payload.createdAt = window.serverTimestamp();
+                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan'), payload);
+                        showToast("Data berhasil disimpan");
+                    }
+                    setShowModal(false);
+                } catch (err) { showToast("Gagal menyimpan data", "error"); }
+                finally { setSubmitting(false); }
+            };
+
+            const handleDelete = async (id) => {
+                if (!confirm("Hapus data ini?")) return;
+                try {
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'keuangan', id));
+                    showToast("Data dihapus");
+                } catch (err) { showToast("Gagal menghapus", "error"); }
+            };
+
+            // ===== JURNAL UMUM FUNCTIONS =====
+            const juResetForm = () => {
+                setJuFormDate(new Date().toISOString().slice(0,10));
+                setJuFormLines([
+                    { keterangan: '', debit: '', kredit: '' },
+                    { keterangan: '', debit: '', kredit: '' },
+                ]);
+                setJuEditingId(null);
+            };
+
+            const juOpenAdd = () => {
+                juResetForm();
+                setShowJuModal(true);
+            };
+
+            const juOpenEdit = (entry) => {
+                setJuEditingId(entry.id);
+                setJuFormDate(entry.date);
+                setJuFormLines(entry.lines ? entry.lines.map(l => ({
+                    keterangan: l.keterangan || '',
+                    debit: l.debit ? String(l.debit) : '',
+                    kredit: l.kredit ? String(l.kredit) : '',
+                })) : [{ keterangan:'', debit:'', kredit:'' }]);
+                setShowJuModal(true);
+            };
+
+            const juHandleSubmit = async () => {
+                const validLines = juFormLines.filter(l => l.keterangan.trim() || safeNumber(l.debit) || safeNumber(l.kredit));
+                if (!juFormDate) { showToast("Tanggal wajib diisi!", "error"); return; }
+                if (validLines.length === 0) { showToast("Isi minimal satu baris jurnal!", "error"); return; }
+                const totalDebit  = validLines.reduce((a, l) => a + safeNumber(l.debit), 0);
+                const totalKredit = validLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
+                if (totalDebit !== totalKredit || totalDebit === 0) {
+                    showToast(`Debit (${formatRupiah(totalDebit)}) ≠ Kredit (${formatRupiah(totalKredit)}). Periksa kembali!`, "error");
+                    return;
+                }
+                setJuSubmitting(true);
+                const payload = {
+                    date: juFormDate,
+                    lines: validLines.map(l => ({
+                        keterangan: l.keterangan.trim(),
+                        debit: safeNumber(l.debit),
+                        kredit: safeNumber(l.kredit),
+                    })),
+                    totalDebit,
+                    storeId: currentProfile.id === 'all_stores' ? 'default' : currentProfile.id,
+                    user: user.email,
+                    updatedAt: window.serverTimestamp(),
+                };
+                try {
+                    if (juEditingId) {
+                        await window.updateDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', juEditingId), payload);
+                        showToast("Jurnal umum diperbarui");
+                    } else {
+                        payload.createdAt = window.serverTimestamp();
+                        await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum'), payload);
+                        showToast("Jurnal umum disimpan");
+                    }
+                    setShowJuModal(false);
+                } catch (err) { showToast("Gagal menyimpan", "error"); }
+                finally { setJuSubmitting(false); }
+            };
+
+            const juHandleDelete = async (id) => {
+                if (!confirm("Hapus entri jurnal umum ini?")) return;
+                try {
+                    await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'jurnal_umum', id));
+                    showToast("Data dihapus");
+                } catch (err) { showToast("Gagal menghapus", "error"); }
+            };
+
+            const juAddLine = () => setJuFormLines(prev => [...prev, { keterangan:'', debit:'', kredit:'' }]);
+            const juRemoveLine = (i) => setJuFormLines(prev => prev.filter((_, idx) => idx !== i));
+            const juUpdateLine = (i, field, val) => setJuFormLines(prev => prev.map((l, idx) => idx === i ? { ...l, [field]: val } : l));
+
+            if (loading || juLoading) return <div className="flex justify-center items-center min-h-[70vh]"><div className="typing-dot bg-emerald-600"></div></div>;
+
+            const isIn = activeSubTab === 'penerimaan';
+            const isJu = activeSubTab === 'jurnal_umum';
+
+            // Format angka jurnal: kosong jika 0, rupiah jika ada
+            const fJurnal = (n) => n ? formatRupiah(n) : '';
+
+            // Tanggal singkat untuk jurnal (dd)
+            const fTglJurnal = (dateStr) => {
+                if (!dateStr) return '';
+                return dateStr.split('-')[2]; // ambil hanya tanggal
+            };
+
+            return (
+                <div className="max-w-5xl mx-auto space-y-4 pb-28">
+
+                    {/* Header */}
+                    <div>
+                        <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <Icon name="scale-balanced" className="text-emerald-600" /> Keuangan
+                        </h1>
+                        <p className="text-[10px] text-slate-500 font-bold">Semua Toko — Data Gabungan</p>
+                    </div>
+
+                    {/* Summary Card */}
+                    <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-gradient-to-br from-emerald-500 to-green-600 rounded-2xl p-4 text-white shadow-lg shadow-green-200">
+                            <p className="text-green-100 text-[10px] font-bold uppercase mb-1">Penerimaan</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.inTotal)}</p>
+                        </div>
+                        <div className="bg-gradient-to-br from-red-500 to-rose-600 rounded-2xl p-4 text-white shadow-lg shadow-red-200">
+                            <p className="text-red-100 text-[10px] font-bold uppercase mb-1">Pengeluaran</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.outTotal)}</p>
+                        </div>
+                        <div className={`bg-gradient-to-br ${stats.net >= 0 ? 'from-sky-500 to-blue-600 shadow-blue-200' : 'from-orange-500 to-amber-600 shadow-orange-200'} rounded-2xl p-4 text-white shadow-lg`}>
+                            <p className="text-sky-100 text-[10px] font-bold uppercase mb-1">Selisih</p>
+                            <p className="text-sm font-black leading-tight">{formatRupiah(stats.net)}</p>
+                        </div>
+                    </div>
+
+                    {/* Sub-tab Switch */}
+                    <div className="flex bg-white p-1.5 rounded-xl shadow-sm border border-slate-100">
+                        <button onClick={() => setActiveSubTab('penerimaan')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'penerimaan' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="circle-arrow-down" /> Penerimaan Kas
+                        </button>
+                        <button onClick={() => setActiveSubTab('pengeluaran')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="circle-arrow-up" /> Pengeluaran Kas
+                        </button>
+                        <button onClick={() => setActiveSubTab('jurnal_umum')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${activeSubTab === 'jurnal_umum' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400'}`}>
+                            <Icon name="book-open" /> Jurnal Umum
+                        </button>
+                    </div>
+
+                    {/* Filter Bulan */}
+                    <div className="flex items-center gap-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase">Periode:</label>
+                        <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+                            className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400" />
+                    </div>
+
+                    {/* ===== PENERIMAAN KAS - JURNAL TABLE ===== */}
+                    {isIn && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            {/* Jurnal Header */}
+                            <div className="bg-gradient-to-r from-emerald-600 to-green-600 px-4 py-3 text-center">
+                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
+                                <p className="text-emerald-100 font-bold text-xs mt-0.5">Jurnal Penerimaan Kas</p>
+                                <p className="text-emerald-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
+                            </div>
+
+                            {/* Table scroll wrapper */}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[11px] border-collapse min-w-[600px]">
+                                    <thead>
+                                        <tr className="bg-slate-50">
+                                            {/* Grup header */}
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-700 font-black" colSpan={2}>Debit</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={3}>Kredit</th>
+                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
+                                        </tr>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Kas</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-emerald-600 font-bold whitespace-nowrap">Pot. Penj.</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Piutang</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Penjualan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Serba-Serbi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredAsc.length === 0 && (
+                                            <tr>
+                                                <td colSpan={readOnly ? 7 : 8} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                    Belum ada penerimaan kas
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {filteredAsc.map((entry, idx) => (
+                                            <tr key={entry.id} className={`fade-in hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.kas != null ? entry.kas : entry.amount)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-emerald-700 whitespace-nowrap">{fJurnal(entry.potonganPenjualan)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.piutang)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.penjualan)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.serbiSerbi)}</td>
+                                                {!readOnly && (
+                                                    <td className="border border-slate-200 px-1 py-1 text-center">
+                                                        <div className="flex flex-col gap-0.5 items-center">
+                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                        </div>
+                                                    </td>
+                                                )}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {/* Footer totals */}
+                                    {filteredAsc.length > 0 && (
+                                        <tfoot>
+                                            <tr className="bg-gradient-to-r from-emerald-50 to-green-50">
+                                                <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{formatRupiah(jurnalTotals.kas)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-emerald-700 whitespace-nowrap">{jurnalTotals.potongan ? formatRupiah(jurnalTotals.potongan) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.piutang ? formatRupiah(jurnalTotals.piutang) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.penjualan ? formatRupiah(jurnalTotals.penjualan) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotals.serbi ? formatRupiah(jurnalTotals.serbi) : '-'}</td>
+                                                {!readOnly && <td className="border border-slate-200"></td>}
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ===== PENGELUARAN KAS - JURNAL TABLE ===== */}
+                    {!isIn && !isJu && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                            {/* Jurnal Header */}
+                            <div className="bg-gradient-to-r from-red-600 to-rose-600 px-4 py-3 text-center">
+                                <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
+                                <p className="text-red-100 font-bold text-xs mt-0.5">Jurnal Pengeluaran Kas</p>
+                                <p className="text-red-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
+                            </div>
+
+                            {/* Table scroll wrapper */}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-[11px] border-collapse min-w-[680px]">
+                                    <thead>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Tgl</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Keterangan</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold" rowSpan={2}>Ref.</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-700 font-black" colSpan={3}>Debet</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black" colSpan={2}>Kredit</th>
+                                            {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold" rowSpan={2}>•</th>}
+                                        </tr>
+                                        <tr className="bg-slate-50">
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Utang</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Pembelian</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-red-600 font-bold whitespace-nowrap">Akun Lainnya</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Kas</th>
+                                            <th className="border border-slate-200 px-2 py-2 text-center text-sky-600 font-bold whitespace-nowrap">Pot. Pembelian</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredOutAsc.length === 0 && (
+                                            <tr>
+                                                <td colSpan={readOnly ? 8 : 9} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                    <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                    Belum ada pengeluaran kas
+                                                </td>
+                                            </tr>
+                                        )}
+                                        {filteredOutAsc.map((entry, idx) => (
+                                            <tr key={entry.id} className={`fade-in hover:bg-red-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
+                                                <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-700 whitespace-nowrap">{fTglJurnal(entry.date)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-slate-700">{entry.description}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-center text-slate-500">{entry.ref || ''}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.utang)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.pembelian)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-red-700 whitespace-nowrap">{fJurnal(entry.akunLainnya)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.kasOut != null ? entry.kasOut : entry.amount)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-medium text-sky-700 whitespace-nowrap">{fJurnal(entry.potonganPembelian)}</td>
+                                                {!readOnly && (
+                                                    <td className="border border-slate-200 px-1 py-1 text-center">
+                                                        <div className="flex flex-col gap-0.5 items-center">
+                                                            <button onClick={() => openEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                            <button onClick={() => handleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                        </div>
+                                                    </td>
+                                                )}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {/* Footer totals */}
+                                    {filteredOutAsc.length > 0 && (
+                                        <tfoot>
+                                            <tr className="bg-gradient-to-r from-red-50 to-rose-50">
+                                                <td colSpan={3} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.utang ? formatRupiah(jurnalTotalsOut.utang) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.pembelian ? formatRupiah(jurnalTotalsOut.pembelian) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-red-700 whitespace-nowrap">{jurnalTotalsOut.akunLainnya ? formatRupiah(jurnalTotalsOut.akunLainnya) : '-'}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(jurnalTotalsOut.kas)}</td>
+                                                <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{jurnalTotalsOut.potonganPembelian ? formatRupiah(jurnalTotalsOut.potonganPembelian) : '-'}</td>
+                                                {!readOnly && <td className="border border-slate-200"></td>}
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ===== JURNAL UMUM TABLE ===== */}
+                    {isJu && (() => {
+                        const juFiltered = [...juEntries.filter(e => e.date && e.date.startsWith(filterMonth))].sort((a, b) => a.date.localeCompare(b.date));
+                        const juTotalDebit  = juFiltered.reduce((a, e) => a + safeNumber(e.totalDebit), 0);
+                        const juTotalKredit = juFiltered.reduce((a, e) => a + e.lines.reduce((s, l) => s + safeNumber(l.kredit), 0), 0);
+
+                        return (
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                                <div className="bg-gradient-to-r from-violet-600 to-purple-700 px-4 py-3 text-center">
+                                    <p className="text-white font-black text-sm tracking-wide uppercase">Apotek Rafa Medica</p>
+                                    <p className="text-violet-100 font-bold text-xs mt-0.5">Jurnal Umum</p>
+                                    <p className="text-violet-200 text-[10px] font-medium mt-0.5">Periode {formatBulanIndo(filterMonth)}</p>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-[11px] border-collapse min-w-[420px]">
+                                        <thead>
+                                            <tr className="bg-slate-50">
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold w-10">Tgl</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-slate-600 font-bold">Keterangan</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-violet-700 font-black whitespace-nowrap">Debit</th>
+                                                <th className="border border-slate-200 px-2 py-2 text-center text-sky-700 font-black whitespace-nowrap">Kredit</th>
+                                                {!readOnly && <th className="border border-slate-200 px-2 py-2 text-center text-slate-400 font-bold w-8">•</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {juFiltered.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={readOnly ? 4 : 5} className="border border-slate-200 text-center py-10 text-slate-300 text-xs">
+                                                        <Icon name="inbox" className="text-3xl mb-2 block mx-auto" />
+                                                        Belum ada entri jurnal umum
+                                                    </td>
+                                                </tr>
+                                            )}
+                                            {juFiltered.map((entry, eIdx) => (
+                                                entry.lines && entry.lines.map((line, lIdx) => (
+                                                    <tr key={`${entry.id}-${lIdx}`} className={`hover:bg-violet-50/20 transition-colors ${eIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
+                                                            {lIdx === 0 ? fTglJurnal(entry.date) : ''}
+                                                        </td>
+                                                        <td className={`border border-slate-200 px-2 py-1.5 text-slate-700 ${lIdx > 0 ? 'pl-6' : ''}`}>
+                                                            {line.keterangan}
+                                                        </td>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-violet-700 whitespace-nowrap">
+                                                            {fJurnal(line.debit)}
+                                                        </td>
+                                                        <td className="border border-slate-200 px-2 py-1.5 text-right font-medium text-sky-700 whitespace-nowrap">
+                                                            {fJurnal(line.kredit)}
+                                                        </td>
+                                                        {!readOnly && (
+                                                            <td className="border border-slate-200 px-1 py-1 text-center" rowSpan={lIdx === 0 ? entry.lines.length : undefined} style={{display: lIdx !== 0 ? 'none' : undefined}}>
+                                                                <div className="flex flex-col gap-0.5 items-center">
+                                                                    <button onClick={() => juOpenEdit(entry)} className="text-slate-300 hover:text-sky-500 p-0.5 transition-colors"><Icon name="pen-to-square" /></button>
+                                                                    <button onClick={() => juHandleDelete(entry.id)} className="text-slate-300 hover:text-red-500 p-0.5 transition-colors"><Icon name="trash" /></button>
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                ))
+                                            ))}
+                                        </tbody>
+                                        {juFiltered.length > 0 && (
+                                            <tfoot>
+                                                <tr className="bg-gradient-to-r from-violet-50 to-purple-50">
+                                                    <td colSpan={2} className="border border-slate-200 px-2 py-2 font-black text-slate-700 text-right uppercase text-[10px]">Total</td>
+                                                    <td className="border border-slate-200 px-2 py-2 text-right font-black text-violet-700 whitespace-nowrap">{formatRupiah(juTotalDebit)}</td>
+                                                    <td className="border border-slate-200 px-2 py-2 text-right font-black text-sky-700 whitespace-nowrap">{formatRupiah(juTotalKredit)}</td>
+                                                    {!readOnly && <td className="border border-slate-200"></td>}
+                                                </tr>
+                                            </tfoot>
+                                        )}
+                                    </table>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    {/* FAB */}
+                    {!readOnly && (
+                        <button onClick={isJu ? juOpenAdd : openAdd}
+                            className={`fixed bottom-24 md:bottom-10 right-6 ${isJu ? 'bg-violet-600 shadow-violet-300' : isIn ? 'bg-emerald-600 shadow-emerald-300' : 'bg-red-600 shadow-red-300'} text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-30 active:scale-95 transition-all`}>
+                            <Icon name="plus" className="text-2xl" />
+                        </button>
+                    )}
+
+                    {/* ===== MODAL JURNAL UMUM ===== */}
+                    {showJuModal && (() => {
+                        const juLiveTotalDebit  = juFormLines.reduce((a, l) => a + safeNumber(l.debit), 0);
+                        const juLiveTotalKredit = juFormLines.reduce((a, l) => a + safeNumber(l.kredit), 0);
+                        const juBalanced = juLiveTotalDebit > 0 && juLiveTotalDebit === juLiveTotalKredit;
+                        return (
+                            <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
+                                <div className="bg-white w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+                                    {/* Modal Header */}
+                                    <div className="p-5 flex-shrink-0 bg-gradient-to-r from-violet-600 to-purple-700">
+                                        <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                            <Icon name="book-open" />
+                                            {juEditingId ? 'Edit' : 'Tambah'} Jurnal Umum
+                                        </h3>
+                                        <p className="text-violet-200 text-[10px] mt-1 font-medium">Debit harus sama dengan Kredit</p>
+                                    </div>
+                                    {/* Modal Body */}
+                                    <div className="p-4 space-y-3 overflow-y-auto flex-1">
+                                        {/* Tanggal */}
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal Transaksi</label>
+                                            <input type="date" value={juFormDate} onChange={e => setJuFormDate(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-violet-400" />
+                                        </div>
+                                        {/* Baris jurnal */}
+                                        <div className="space-y-2">
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-px flex-1 bg-violet-100"></div>
+                                                <span className="text-[10px] font-black text-violet-600 uppercase">Baris Jurnal</span>
+                                                <div className="h-px flex-1 bg-violet-100"></div>
+                                            </div>
+                                            {/* Header mini */}
+                                            <div className="grid grid-cols-[1fr_90px_90px_24px] gap-1 text-[9px] font-black text-slate-400 uppercase px-1">
+                                                <span>Keterangan / Akun</span>
+                                                <span className="text-center text-violet-600">Debit</span>
+                                                <span className="text-center text-sky-600">Kredit</span>
+                                                <span></span>
+                                            </div>
+                                            {juFormLines.map((line, i) => (
+                                                <div key={i} className="grid grid-cols-[1fr_90px_90px_24px] gap-1 items-center">
+                                                    <input
+                                                        type="text"
+                                                        placeholder={i === 0 ? "Mis: Kas..." : "Mis: Modal..."}
+                                                        value={line.keterangan}
+                                                        onChange={e => juUpdateLine(i, 'keterangan', e.target.value)}
+                                                        className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:border-violet-400 w-full"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="0"
+                                                        value={line.debit}
+                                                        onChange={e => juUpdateLine(i, 'debit', e.target.value)}
+                                                        className="p-2 bg-violet-50 border border-violet-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-violet-500 w-full"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        placeholder="0"
+                                                        value={line.kredit}
+                                                        onChange={e => juUpdateLine(i, 'kredit', e.target.value)}
+                                                        className="p-2 bg-sky-50 border border-sky-200 rounded-lg text-xs font-bold text-right focus:outline-none focus:border-sky-500 w-full"
+                                                    />
+                                                    <button onClick={() => juRemoveLine(i)} disabled={juFormLines.length <= 2} className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-red-400 disabled:opacity-20 transition-colors text-xs">
+                                                        <Icon name="xmark" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                            <button onClick={juAddLine} className="w-full py-2 border-2 border-dashed border-violet-200 text-violet-400 hover:border-violet-400 hover:text-violet-600 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1">
+                                                <Icon name="plus" /> Tambah Baris
+                                            </button>
+                                        </div>
+                                        {/* Live balance */}
+                                        {(juLiveTotalDebit > 0 || juLiveTotalKredit > 0) && (
+                                            <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${juBalanced ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                <span><Icon name={juBalanced ? "check-circle" : "triangle-exclamation"} className="mr-1" />Debit: {formatRupiah(juLiveTotalDebit)}</span>
+                                                <span>Kredit: {formatRupiah(juLiveTotalKredit)}</span>
+                                                {!juBalanced && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(juLiveTotalDebit - juLiveTotalKredit))}</span>}
+                                            </div>
+                                        )}
+                                    </div>
+                                    {/* Footer */}
+                                    <div className="p-4 flex gap-2 flex-shrink-0 border-t border-slate-100">
+                                        <button onClick={() => setShowJuModal(false)}
+                                            className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                                            Batal
+                                        </button>
+                                        <button onClick={juHandleSubmit} disabled={juSubmitting}
+                                            className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors">
+                                            {juSubmitting ? 'Menyimpan...' : (juEditingId ? 'Perbarui' : 'Simpan')}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    {/* ===== MODAL ADD/EDIT ===== */}
+                    {showModal && (
+                        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm fade-in">
+                            <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+                                {/* Modal Header */}
+                                <div className={`p-5 flex-shrink-0 ${isIn ? 'bg-gradient-to-r from-emerald-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
+                                    <h3 className="font-bold text-white text-base flex items-center gap-2">
+                                        <Icon name={isIn ? "circle-arrow-down" : "circle-arrow-up"} />
+                                        {editingId ? 'Edit' : 'Tambah'} {isIn ? 'Penerimaan Kas' : 'Pengeluaran Kas'}
+                                    </h3>
+                                    {isIn && <p className="text-emerald-100 text-[10px] mt-1 font-medium">Isi kolom jurnal sesuai transaksi</p>}
+                                </div>
+                                {/* Modal Body (scrollable) */}
+                                <div className="p-5 space-y-3 overflow-y-auto flex-1">
+                                    {/* Tanggal & Keterangan (semua tipe) */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Tanggal</label>
+                                            <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-400" />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Keterangan</label>
+                                            <input type="text" placeholder="Mis: Penjualan tunai..." value={formDesc} onChange={e => setFormDesc(e.target.value)}
+                                                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-emerald-400" />
+                                        </div>
+                                    </div>
+
+                                    {/* ---- PENERIMAAN KAS: KOLOM JURNAL ---- */}
+                                    {isIn && (
+                                        <>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-emerald-100"></div>
+                                                <span className="text-[10px] font-black text-emerald-600 uppercase">Debit</span>
+                                                <div className="h-px flex-1 bg-emerald-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Kas</label>
+                                                    <input type="number" placeholder="0" value={formKas} onChange={e => setFormKas(e.target.value)}
+                                                        className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-emerald-600 uppercase block mb-1">Potongan Penjualan</label>
+                                                    <input type="number" placeholder="0" value={formPotongan} onChange={e => setFormPotongan(e.target.value)}
+                                                        className="w-full p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold focus:outline-none focus:border-emerald-500" />
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Piutang</label>
+                                                    <input type="number" placeholder="0" value={formPiutang} onChange={e => setFormPiutang(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Penjualan</label>
+                                                    <input type="number" placeholder="0" value={formPenjualan} onChange={e => setFormPenjualan(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Serba-Serbi</label>
+                                                <input type="number" placeholder="0" value={formSerbi} onChange={e => setFormSerbi(e.target.value)}
+                                                    className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                            </div>
+                                            {/* Live balance check */}
+                                            {(formKas || formPotongan || formPiutang || formPenjualan || formSerbi) && (() => {
+                                                const d = safeNumber(formKas) + safeNumber(formPotongan);
+                                                const k = safeNumber(formPiutang) + safeNumber(formPenjualan) + safeNumber(formSerbi);
+                                                const ok = d === k && d > 0;
+                                                return (
+                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />
+                                                            Debit: {formatRupiah(d)}
+                                                        </span>
+                                                        <span>Kredit: {formatRupiah(k)}</span>
+                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </>
+                                    )}
+
+                                    {/* ---- PENGELUARAN KAS ---- */}
+                                    {!isIn && (
+                                        <>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Ref. (opsional)</label>
+                                                <input type="text" placeholder="No. referensi..." value={formRef} onChange={e => setFormRef(e.target.value)}
+                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:border-red-400" />
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-red-100"></div>
+                                                <span className="text-[10px] font-black text-red-600 uppercase">Debet</span>
+                                                <div className="h-px flex-1 bg-red-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Utang</label>
+                                                    <input type="number" placeholder="0" value={formUtang} onChange={e => setFormUtang(e.target.value)}
+                                                        className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Pembelian</label>
+                                                    <input type="number" placeholder="0" value={formPembelian} onChange={e => setFormPembelian(e.target.value)}
+                                                        className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] font-bold text-red-600 uppercase block mb-1">Akun Lainnya</label>
+                                                <input type="number" placeholder="0" value={formAkunLainnya} onChange={e => setFormAkunLainnya(e.target.value)}
+                                                    className="w-full p-3 bg-red-50 border border-red-200 rounded-xl text-sm font-bold focus:outline-none focus:border-red-500" />
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-1">
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                                <span className="text-[10px] font-black text-sky-600 uppercase">Kredit</span>
+                                                <div className="h-px flex-1 bg-sky-100"></div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Kas</label>
+                                                    <input type="number" placeholder="0" value={formKasOut} onChange={e => setFormKasOut(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Pot. Pembelian</label>
+                                                    <input type="number" placeholder="0" value={formPotonganPembelian} onChange={e => setFormPotonganPembelian(e.target.value)}
+                                                        className="w-full p-3 bg-sky-50 border border-sky-200 rounded-xl text-sm font-bold focus:outline-none focus:border-sky-500" />
+                                                </div>
+                                            </div>
+                                            {/* Live balance check pengeluaran */}
+                                            {(formUtang || formPembelian || formAkunLainnya || formKasOut || formPotonganPembelian) && (() => {
+                                                const d = safeNumber(formUtang) + safeNumber(formPembelian) + safeNumber(formAkunLainnya);
+                                                const k = safeNumber(formKasOut) + safeNumber(formPotonganPembelian);
+                                                const ok = d === k && d > 0;
+                                                return (
+                                                    <div className={`rounded-xl p-3 flex items-center justify-between text-xs font-bold ${ok ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                                                        <span><Icon name={ok ? "check-circle" : "triangle-exclamation"} className="mr-1" />
+                                                            Debet: {formatRupiah(d)}
+                                                        </span>
+                                                        <span>Kredit: {formatRupiah(k)}</span>
+                                                        {!ok && <span className="text-[10px] font-black">Selisih: {formatRupiah(Math.abs(d-k))}</span>}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </>
+                                    )}
+
+                                    <div className="flex gap-2 pt-2">
+                                        <button onClick={() => setShowModal(false)}
+                                            className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-200 transition-colors">
+                                            Batal
+                                        </button>
+                                        <button onClick={handleSubmit} disabled={submitting}
+                                            className={`flex-1 py-3 ${isIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'} text-white rounded-xl font-bold text-sm disabled:opacity-50 transition-colors`}>
+                                            {submitting ? 'Menyimpan...' : (editingId ? 'Perbarui' : 'Simpan')}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
         const BulkImportView = ({ onImportComplete, user, currentProfile, readOnly }) => {
             const [textInput, setTextInput] = useState('');
             const [parsedItems, setParsedItems] = useState([]);
@@ -11301,6 +11439,80 @@
                             <div className="grid grid-cols-5 gap-3"><div className="col-span-3 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Jumlah</label><div className="relative"><input type="number" step="any" className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white outline-none transition-all font-bold text-slate-700 text-sm focus:border-slate-400" value={formData.qty || ''} onChange={e=>setFormData({...formData, qty: e.target.value})} placeholder="0" /><div className="absolute right-3 top-1/2 -translate-y-1/2 flex flex-col gap-0.5"><button type="button" onClick={() => setFormData({...formData, qty: safeNumber(formData.qty)+1})} className="w-4 h-4 bg-white rounded shadow text-[8px] text-slate-500 hover:text-brand-600"><Icon name="chevron-up" /></button><button type="button" onClick={() => setFormData({...formData, qty: Math.max(0, safeNumber(formData.qty)-1)})} className="w-4 h-4 bg-white rounded shadow text-[8px] text-slate-500 hover:text-red-600"><Icon name="chevron-down" /></button></div></div></div><div className="col-span-2 space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Satuan</label><select className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 outline-none appearance-none font-medium text-sm text-slate-600 focus:border-slate-400" value={formData.unit || 'Pcs'} onChange={e=>setFormData({...formData, unit: e.target.value})}>{unitOptions.map(u => <option key={u} value={u}>{u}</option>)}</select></div></div>
                             <div className="space-y-1.5"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1">Kadaluarsa</label><input type="date" className="w-full p-3.5 rounded-xl bg-slate-50 border border-slate-200 outline-none font-medium text-sm transition-all focus:bg-white text-slate-600 focus:border-slate-400" value={formData.exp || ''} onChange={e=>setFormData({...formData, exp: e.target.value})} /></div>
                             <div className="space-y-1.5 bg-slate-50 p-3 rounded-xl border border-dashed border-slate-200"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider ml-1 flex justify-between">Minimum Stok (Khusus) <span className="text-[9px] font-normal lowercase text-slate-400">kosongkan jika ikut aturan global</span></label><input type="number" className="w-full p-2.5 rounded-lg bg-white border border-slate-200 focus:border-sky-500 outline-none text-sm" placeholder="Contoh: 10 (Item ini akan 'Low' jika dibawah 10)" value={formData.minStock || ''} onChange={e=>setFormData({...formData, minStock: e.target.value})} /></div>
+
+                            {/* ===== HARGA PAKET ===== */}
+                            {(() => {
+                                const pkgs = formData.packagePrices || [];
+                                const [showAddPkg, setShowAddPkg] = React.useState(false);
+                                const [pkgForm, setPkgForm] = React.useState({ name: 'Box', qty: '', price: '' });
+                                const [editingPkgIdx, setEditingPkgIdx] = React.useState(null);
+                                const savePkg = () => {
+                                    if (!pkgForm.name.trim() || !pkgForm.qty || !pkgForm.price) return;
+                                    const newPkg = { name: pkgForm.name.trim(), qty: parseInt(pkgForm.qty) || 1, price: safeNumber(pkgForm.price) };
+                                    let updated;
+                                    if (editingPkgIdx !== null) {
+                                        updated = pkgs.map((p, i) => i === editingPkgIdx ? newPkg : p);
+                                    } else {
+                                        updated = [...pkgs, newPkg];
+                                    }
+                                    setFormData({ ...formData, packagePrices: updated });
+                                    setPkgForm({ name: 'Box', qty: '', price: '' });
+                                    setShowAddPkg(false);
+                                    setEditingPkgIdx(null);
+                                };
+                                const deletePkg = (idx) => setFormData({ ...formData, packagePrices: pkgs.filter((_, i) => i !== idx) });
+                                const startEdit = (idx) => { setPkgForm({ name: pkgs[idx].name, qty: String(pkgs[idx].qty), price: String(pkgs[idx].price) }); setEditingPkgIdx(idx); setShowAddPkg(true); };
+                                return (
+                                    <div className="space-y-2 bg-amber-50 p-3 rounded-xl border border-amber-200">
+                                        <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider ml-1 flex items-center gap-1">
+                                            <Icon name="box-open" className="text-[10px]" /> Harga Paket
+                                            <span className="text-[9px] font-normal lowercase text-slate-400 ml-1">— opsional, mis: Box isi 10 Strip</span>
+                                        </label>
+                                        {pkgs.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                {pkgs.map((p, i) => (
+                                                    <div key={i} className="flex items-center gap-2 bg-white rounded-lg px-2.5 py-1.5 border border-amber-100">
+                                                        <span className="text-xs font-bold text-amber-700 flex-1">{p.name} <span className="text-slate-400 font-normal">isi {p.qty} {formData.unit || 'Pcs'}</span></span>
+                                                        <span className="text-xs font-bold text-slate-700">{formatRupiah(p.price)}</span>
+                                                        <button type="button" onClick={() => startEdit(i)} className="w-6 h-6 rounded bg-sky-50 hover:bg-sky-100 text-sky-500 text-[10px] flex items-center justify-center"><Icon name="pen" /></button>
+                                                        <button type="button" onClick={() => deletePkg(i)} className="w-6 h-6 rounded bg-red-50 hover:bg-red-100 text-red-400 text-[10px] flex items-center justify-center"><Icon name="trash" /></button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {showAddPkg ? (
+                                            <div className="bg-white rounded-lg p-2.5 border border-amber-200 space-y-2">
+                                                <div className="flex gap-2">
+                                                    <div className="flex-1 space-y-1">
+                                                        <label className="text-[9px] font-bold text-slate-500 uppercase">Nama Paket</label>
+                                                        <input className="w-full p-2 rounded-lg border border-slate-200 text-xs font-bold outline-none focus:border-amber-400" value={pkgForm.name} onChange={e => setPkgForm({...pkgForm, name: e.target.value})} placeholder="Box / Karton / Lusin" />
+                                                    </div>
+                                                    <div className="w-20 space-y-1">
+                                                        <label className="text-[9px] font-bold text-slate-500 uppercase">Isi ({formData.unit || 'Pcs'})</label>
+                                                        <input type="number" className="w-full p-2 rounded-lg border border-slate-200 text-xs font-bold outline-none focus:border-amber-400" value={pkgForm.qty} onChange={e => setPkgForm({...pkgForm, qty: e.target.value})} placeholder="10" />
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-bold text-slate-500 uppercase">Harga Paket (Rp)</label>
+                                                    <input type="number" className="w-full p-2 rounded-lg border border-slate-200 text-xs font-bold outline-none focus:border-amber-400" value={pkgForm.price} onChange={e => setPkgForm({...pkgForm, price: e.target.value})} placeholder="Mis: 80000" />
+                                                </div>
+                                                {pkgForm.qty && pkgForm.price && safeNumber(pkgForm.price) > 0 && parseInt(pkgForm.qty) > 0 && (
+                                                    <p className="text-[9px] text-amber-600 font-bold">= {formatRupiah(safeNumber(pkgForm.price) / parseInt(pkgForm.qty))} per {formData.unit || 'Pcs'}</p>
+                                                )}
+                                                <div className="flex gap-2">
+                                                    <button type="button" onClick={() => { setShowAddPkg(false); setEditingPkgIdx(null); setPkgForm({ name: 'Box', qty: '', price: '' }); }} className="flex-1 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold">Batal</button>
+                                                    <button type="button" onClick={savePkg} className="flex-1 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold">{editingPkgIdx !== null ? 'Simpan' : 'Tambah'}</button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <button type="button" onClick={() => { setShowAddPkg(true); setEditingPkgIdx(null); setPkgForm({ name: 'Box', qty: '', price: '' }); }} className="flex items-center gap-1.5 text-amber-600 text-xs font-bold hover:text-amber-700">
+                                                <Icon name="plus" className="text-[10px]" /> Tambah Paket
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
                             <div className="pt-4 flex gap-3">{isEditing && (<button type="button" disabled={submitting} onClick={onCancel} className="flex-1 py-3.5 rounded-xl text-slate-600 font-bold bg-white border border-slate-200 hover:bg-slate-50 text-sm transition-colors">Batal</button>)}<button type="submit" disabled={submitting} className={`flex-1 py-3.5 rounded-xl text-white font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 ${isEditing ? 'bg-slate-700 hover:bg-slate-800' : 'bg-sky-600 hover:bg-sky-700 shadow-sky-200'}`}>{submitting ? <div className="typing-dot bg-white" /> : <Icon name={isEditing ? 'check' : 'plus'} />} {submitting ? 'Menyimpan...' : (isEditing ? 'Simpan' : 'Tambah')}</button></div>
                         </form>
                     </div>
@@ -12652,7 +12864,7 @@
 
         // ==================== AUTH UTILITIES ====================
         const INVITATION_CODE = "12345670";
-        const OWNER_EMAILS = ["kayzen796@gmail.com", "raynkidzone@gmail.com"];
+        const OWNER_EMAILS = ["kayzen796@gmail.com", "sugaramilk99@gmail.com"];
         const OWNER_EMAIL = OWNER_EMAILS[0]; // email utama untuk tampilan pesan
         const isOwnerEmail = (email) => OWNER_EMAILS.includes((email || '').toLowerCase());
 
@@ -12855,7 +13067,7 @@
                                     <Icon name="shop" className="text-white text-2xl" />
                                 </div>
                             </div>
-                            <h1 className="font-black text-2xl text-slate-800 tracking-tight">Rafa Medica</h1>
+                            <h1 className="font-black text-2xl text-slate-800 tracking-tight">Apotek Rafa Medica</h1>
                             <p className="text-slate-500 text-sm font-medium mt-1">Sistem Kasir & Manajemen Stok</p>
                         </div>
 
@@ -15021,7 +15233,7 @@
             const [searchQuery, setSearchQuery] = useState('');
             const [showOnlyLowStock, setShowOnlyLowStock] = useState(false);
             const [selectedRacks, setSelectedRacks] = useState([]);
-            const [formData, setFormData] = useState({ name: '', qty: '', unit: 'Pcs', exp: '', rack: '', price: '', costPrice: '', minStock: '', defaultDiscount: '', defaultDiscountType: '%' });
+            const [formData, setFormData] = useState({ name: '', qty: '', unit: 'Pcs', exp: '', rack: '', price: '', costPrice: '', minStock: '', defaultDiscount: '', defaultDiscountType: '%', packagePrices: [] });
             const [editingItem, setEditingItem] = useState(null); 
             const [deleteModal, setDeleteModal] = useState({ show: false, item: null });
             const [deleteRackModal, setDeleteRackModal] = useState({ show: false, rackName: null });
@@ -15472,6 +15684,7 @@
                         price: safeNumber(formData.price), costPrice: safeNumber(formData.costPrice), minStock: formData.minStock ? safeNumber(formData.minStock) : null,
                         defaultDiscount: formData.defaultDiscount ? safeNumber(formData.defaultDiscount) : 0,
                         defaultDiscountType: formData.defaultDiscountType || '%',
+                        packagePrices: (formData.packagePrices || []).filter(p => p.name && p.qty > 0 && p.price > 0),
                         updatedAt: window.serverTimestamp()
                     };
                     const stockUpdate = { [`stocks.${activeStoreId}`]: newQty };
@@ -15523,7 +15736,7 @@
                         }
                     }
 
-                    setEditingItem(null); setFormData({ name: '', qty: '', unit: 'Pcs', exp: '', rack: '', price: '', costPrice: '', minStock: '', defaultDiscount: '', defaultDiscountType: '%' }); setActiveTab('list');
+                    setEditingItem(null); setFormData({ name: '', qty: '', unit: 'Pcs', exp: '', rack: '', price: '', costPrice: '', minStock: '', defaultDiscount: '', defaultDiscountType: '%', packagePrices: [] }); setActiveTab('list');
                 } catch (error) { console.error("Error saving:", error); showToast("Gagal menyimpan ke database", "error"); } finally { setSubmitting(false); }
             };
 
@@ -15899,7 +16112,7 @@
                         {activeTab === 'cashbook' && (<CashBookView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='cashbook')?.readOnly} />)}
                         {activeTab === 'keuangan' && (<KeuanganView user={user} currentProfile={currentProfile} showToast={showToast} readOnly={menuItems.find(m=>m.id==='keuangan')?.readOnly} />)}
                         {activeTab === 'list' && (<ListView items={inventoryData} loading={loading} settings={settingsData} searchQuery={searchQuery} setSearchQuery={setSearchQuery} showOnlyLowStock={showOnlyLowStock} setShowOnlyLowStock={setShowOnlyLowStock} selectedRacks={selectedRacks} setSelectedRacks={setSelectedRacks} uniqueRacksData={uniqueRacksData} onCopySuccess={showToast} onEdit={(item) => { setFormData({...item}); setEditingItem(item); setActiveTab('add'); }} onDelete={(item) => setDeleteModal({ show: true, item: item })} onDeleteRack={(rackName) => setDeleteRackModal({ show: true, rackName })} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='list')?.readOnly} isOwner={isOwner} />)}
-                        {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', costPrice:'', minStock: '', defaultDiscount: '', defaultDiscountType: '%'}); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='add')?.readOnly} />)}
+                        {activeTab === 'add' && (<FormView formData={formData} setFormData={setFormData} onSubmit={handleSubmit} isEditing={!!editingItem} submitting={submitting} onCancel={() => { setEditingItem(null); setFormData({name:'', qty:'', unit:'Pcs', exp:'', rack:'', price:'', costPrice:'', minStock: '', defaultDiscount: '', defaultDiscountType: '%', packagePrices: []}); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='add')?.readOnly} />)}
                         {activeTab === 'import' && (<BulkImportView user={user} onImportComplete={(count) => { showToast(`${count} Barang berhasil diimport`); setActiveTab('list'); }} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='import')?.readOnly} />)}
                         {activeTab === 'stock_opname' && (<StockOpnameView items={inventoryData} user={user} showToast={showToast} currentProfile={currentProfile} readOnly={menuItems.find(m=>m.id==='stock_opname')?.readOnly} isOwner={isOwner} />)}
                         {activeTab === 'rekam_medis' && (<RekamMedisView user={user} showToast={showToast} readOnly={menuItems.find(m=>m.id==='rekam_medis')?.readOnly} />)}
